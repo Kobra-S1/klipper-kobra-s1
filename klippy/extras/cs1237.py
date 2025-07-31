@@ -5,6 +5,23 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
 import logging
+import ctypes
+
+from functools import wraps
+
+# Decorator to log method calls
+def log_call(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        logging.warning(f"[{func.__qualname__}] called")
+        return func(*args, **kwargs)
+    return wrapper
+
+def noop(func):
+    return func
+
+ENABLE_LOGGING = False  # True
+log_call = log_call if ENABLE_LOGGING else noop
 
 # State and error constants
 SELF_CHECK_STATE      = 1 << 0
@@ -22,9 +39,14 @@ class CS1237:
     scratch_sensitivity        = 0
     self_check_sensitivity     = 0
     block_filament_sensitivity = 0
-
+    
     def __init__(self, config):
         # Core references
+        self.BLOCK_FILAMENT_STATE = BLOCK_FILAMENT_STATE
+        self.SCRATCH_STATE = SCRATCH_STATE
+        self.SELF_CHECK_STATE = SELF_CHECK_STATE
+        self.HEAD_BLOCK_STATE = HEAD_BLOCK_STATE
+        
         self.printer = config.get_printer()
         self.mcu = config.get_printer().lookup_object('mcu nozzle_mcu')
         ppins       = self.printer.lookup_object('pins')
@@ -35,20 +57,14 @@ class CS1237:
         self.sclk_pin_name       = config.get('sclk_pin')
         self.register_address    = config.getint('register', default=60)
         self.sensitivity         = config.getint('sensitivity', default=-2500)
-        self.samples_count       = config.getint('samples_count', default=10)
-        self.data_bit            = config.getint('data_bit', default=24)
         self._samples_per_second = config.getint('samples_per_second', default=10)
         self._range              = (-0x800000, 0x7FFFFF)
 
         # Threshold sensitivities
-        self.head_block_sensitivity     = config.getint('head_block_sensitivity', default=-300000)
-        self.scratch_sensitivity        = config.getint('scratch_sensitivity', default=-100000)
-        self.self_check_sensitivity     = config.getint('self_check_sensitivity', default=-400)
+        self.head_block_sensitivity = config.getint('head_block_sensitivity', default=-300000)
+        self.scratch_sensitivity = config.getint('scratch_sensitivity', default=-100000)  
+        self.self_check_sensitivity = config.getint('self_check_sensitivity', default=-400)
         self.block_filament_sensitivity = config.getint('block_filament_sensitivity', default=-3000)
-
-        self._clients        = []
-        self._reporting      = False
-        self._query_complete = None
 
         # Resolve pin numbers
         def _get_pin(name):
@@ -76,6 +92,7 @@ class CS1237:
         gcode.register_command('G9121',       self.cmd_g9121, False, '')
         gcode.register_command('G9122',       self.cmd_g9122, False, '')
         gcode.register_command('G9123',       self.cmd_g9123, False, '')
+        gcode.register_command('CS1237_DUMP', self.cmd_dump, False, 'debug CS1237 DUMP')
 
         # Dedicated MCU test commands
         gcode.register_command('CS1237_CHECKSELF', self.cmd_checkself_cs1237, False, 'Trigger checkself_cs1237 MCU command')
@@ -85,26 +102,79 @@ class CS1237:
         gcode.register_command('CS1237_DIFF', self.cmd_query_cs1237_diff, False, 'Trigger query_cs1237_diff MCU command')
         gcode.register_command('CS1237_ENABLE', self.cmd_enable_cs1237, False, 'Trigger enable_cs1237 MCU command')
         
+        # Register event handlers
+        self.printer.register_event_handler('project:ready', self._handle_ready)
+        self.printer.register_event_handler('klippy:ready', self._on_ready_enable)
+    
+    @log_call
+    def _on_ready_enable(self, *a, **k):
+        try:
+            self._cmd_reset.send([self._oid, 1])
+        except Exception:
+            pass
+        self._enable_cs1237(1)
+        try:
+            ticks = self.mcu.seconds_to_clock(0.10)
+            self.cmd_start_report.send([
+                self._oid,
+                1,
+                ticks,
+                0,              
+                self.sensitivity
+            ])
+        except Exception:
+            logging.exception("CS1237: failed to prime comparator")
+        try:
+            self.cmd_start_report.send([self._oid, 0, 0, 0, 0])
+        except Exception:
+            pass
+
+        
+    @log_call
+    def _handle_ready(self, *args):
+        params = None
+        try:
+            self._cmd_reset.send([self._oid, 3])
+
+            reactor = self.printer.get_reactor()
+            reactor.pause(reactor.monotonic() + 0.1)
+
+            self._enable_cs1237(1)
+            self._query_complete = reactor.completion()
+            self.cmd_checkself.send([self._oid, 0])
+
+            params = self._query_complete.wait(reactor.monotonic() + 2.0)
+        except Exception:
+            logging.exception("CS1237: Error in _handle_ready")
+        finally:
+            self._enable_cs1237(0)
+            self._query_complete = None
+
+        if params is not None:
+            state = int(params.get('flag', 0))
+            if state == 0:
+                self.printer.invoke_shutdown("cs1237 boot up checkself failed")
+
+    @log_call
     def cmd_enable_cs1237(self, gcmd):
         state = gcmd.get_int('STATE', 1, minval=0, maxval=1)
-        enable_cmd = self.mcu.lookup_command("enable_cs1237 oid=%c state=%c")
-        enable_cmd.send([self._oid, state])
-        #logging.warning(f"[CS1237] Sent enable_cs1237 with STATE={state}")
-    
+        self._enable_cs1237(state)
+
+    @log_call
     def _enable_cs1237(self, state=1):
-        enable_cmd = self.mcu.lookup_command("enable_cs1237 oid=%c state=%c")
-        enable_cmd.send([self._oid, state])
-        #logging.warning(f"[CS1237] enable_cs1237 called automatically from script with STATE={state}")
+        self._cmd_enable.send([self._oid, state])
+        logging.info(f"[CS1237] _enable_cs1237 called. STATE={state}")
     
     # Dedicated G-code command handlers for MCU commands
+    @log_call
     def cmd_checkself_cs1237(self, gcmd):
         w = gcmd.get_int('W', 0, minval=0, maxval=3)
         self.cmd_checkself.send([
             self._oid,
             w
         ])
-        #logging.warning(f"[CS1237] Sent checkself_cs1237 with W={w}")
-
+        logging.info(f"[CS1237] Sent checkself_cs1237 with W={w}")
+    @log_call
     def cmd_config_cs1237(self, gcmd):
         cfg = (
             f"config_cs1237 oid={self._oid} "
@@ -112,17 +182,17 @@ class CS1237:
             f"register={self.register_address} sensitivity={self.sensitivity}"
         )
         self.mcu.add_config_cmd(cfg)
-        #logging.warning(f"[CS1237] Sent config_cs1237: {cfg}")
+        logging.info(f"[CS1237] Sent config_cs1237: {cfg}")
 
+    @log_call
     def cmd_reset_cs1237(self, gcmd):
         count = gcmd.get_int('COUNT', 3, minval=1, maxval=10)
-        reset_cmd = self.mcu.lookup_command("reset_cs1237 oid=%c count=%c")
-        reset_cmd.send([
+        self._cmd_reset.send([
             self._oid,
             count
         ])
-        #logging.warning(f"[CS1237] Sent reset_cs1237 with COUNT={count}")
-
+        logging.info(f"[CS1237] Sent reset_cs1237 with COUNT={count}")
+    @log_call
     def cmd_start_cs1237_report(self, gcmd):
         ticks = gcmd.get_int('TICKS', self.mcu.seconds_to_clock(1.0 / self._samples_per_second))
         print_state = gcmd.get_int('STATE', 0, minval=0, maxval=3)
@@ -135,7 +205,7 @@ class CS1237:
             sensitivity
         ])
         #logging.warning(f"[CS1237] Sent start_cs1237_report ENABLE={enable} TICKS={ticks} STATE={print_state} SENS={sensitivity}")
-
+    @log_call
     def cmd_query_cs1237_diff(self, gcmd):
         diff_cmd = self.mcu.lookup_command("query_cs1237_diff oid=%c")
         diff_cmd.send([
@@ -143,7 +213,7 @@ class CS1237:
         ])
         #logging.warning(f"[CS1237] Sent query_cs1237_diff")
         self.printer.register_event_handler('cs1237:self_check', self._self_check_sequence)
-
+    @log_call
     def _build_config(self):
         self._oid = self.mcu.create_oid()
         cfg = (
@@ -160,25 +230,29 @@ class CS1237:
         self.cmd_checkself = self.mcu.lookup_command(
             "checkself_cs1237 oid=%c write=%c"
         )
+        self._cmd_enable = self.mcu.lookup_command("enable_cs1237 oid=%c state=%c")
+        self._cmd_reset  = self.mcu.lookup_command("reset_cs1237 oid=%c count=%c")
+
         self.mcu.register_response(self._handle_cs1237_report,  'cs1237_state', self._oid)
         self.mcu.register_response(self._handle_cs1237_diff,    'cs1237_diff', self._oid)
         self.mcu.register_response(self._handle_cs1237_check,   'cs1237_checkself_flag', self._oid)
-
-    # ---- New Response Handlers ----
+    @log_call
     def _handle_start_report_ack(self, params):
         logging.warning(f"[CS1237] start_cs1237_report ACK received: {params}")
-
+    @log_call
     def _handle_checkself_ack(self, params):
         logging.warning(f"[CS1237] checkself_cs1237 ACK received: {params}")
 
     # ---- MCU Response Handlers ----
+    def _int32_conversion(self, value):
+        return ctypes.c_int32(value).value
+    @log_call
     def _handle_cs1237_report(self, params):
-        #logging.warning(f"[cs1237 REPORT] params={params}")
         try:
-            self.adc_value    = int(params.get('adc', 0))
-            self.raw_value    = int(params.get('raw', 0))
+            self.adc_value = self._int32_conversion(int(params.get('adc', 0)))
+            self.raw_value = self._int32_conversion(int(params.get('raw', 0)))
             self.sensor_state = int(params.get('state', 0))
-            #logging.warning(f"[cs1237 REPORT] adc={self.adc_value} raw={self.raw_value} state={self.sensor_state}")
+            logging.warning(f"[CS1237 REPORT] adc={self.adc_value} raw={self.raw_value} state={self.sensor_state}")
 
             msg = {
                 'timestamp': self.printer.get_reactor().monotonic(),
@@ -186,39 +260,63 @@ class CS1237:
                 'raw': self.raw_value,
                 'state': self.sensor_state
             }
+            
+            # Process sensor state events
+            if self.sensor_state == SCRATCH_STATE_ERR:
+                logging.info("CS1237: SCRATCH_STATE_ERR detected")
+                self.printer.send_event("CS1237:scratch_notice", None)
+            elif self.sensor_state == BLOCK_FILAMENT_ERR:
+                logging.info("CS1237: BLOCK_FILAMENT_ERR detected")
+                self.printer.send_event("CS1237:block_filament_notice", None)
+            elif self.sensor_state == HEAD_BLOCK_STATE_ERR:
+                logging.info("CS1237: HEAD_BLOCK_STATE_ERR detected")
+                self.printer.send_event("CS1237:head_block_notice", None)
+                
+            # Notify clients
             for cb in list(self._clients):
                 if cb(msg) is False:
                     self._clients.remove(cb)
         except Exception:
             logging.exception("CS1237: report handler error")
-
+    @log_call
     def _handle_cs1237_diff(self, params):
         try:
             self.raw_value = int(params.get('raw', 0))
             if self._query_complete:
-                self._query_complete.set_result(params)
+                self._query_complete.complete(params)
         except Exception:
             logging.exception("CS1237: diff handler error")
 
+
+    @log_call
     def _handle_cs1237_check(self, params):
         try:
             self.checkself_flag = int(params.get('flag', 0))
             if self._query_complete:
-                self._query_complete.set_result(params)
+                self._query_complete.complete(params)
         except Exception:
             logging.exception("CS1237: self-check handler error")
 
+
     # ---- Status ----
     def get_status(self, eventtime=None):
+        if not self._reporting:
+            return {}
+        
+        # Return status data when reporting is enabled
         return {
             'adc': self.adc_value,
             'raw': self.raw_value,
             'state': self.sensor_state,
             'checkself_flag': self.checkself_flag
         }
+    
+    def stats(self, eventtime):
+        return False, f"cs1237:adc_value={self.adc_value} raw_value={self.raw_value} sensor_state={self.sensor_state}"
 
     # ---- Reporting Control ----
-    def _start_reporting(self):
+    @log_call
+    def start_reporting(self):
         if self._reporting:
             return
         self._reporting = True
@@ -230,9 +328,10 @@ class CS1237:
             0,
             self.sensitivity
         ])
-        logging.warning(f">>> CS1237: _start_reporting (alloc_command)")
-
-    def _stop_reporting(self):
+        logging.warning(f">>> CS1237: start_reporting (alloc_command)")
+    
+    @log_call
+    def stop_reporting(self):
         if not self._reporting:
             return
         self._reporting = False
@@ -243,22 +342,23 @@ class CS1237:
             0,
             self.sensitivity
         ])
-        logging.warning(f">>> CS1237: _stop_reporting (alloc_command)")
-
+        logging.warning(f">>> CS1237: stop_reporting (alloc_command)")
+    @log_call
     def add_client(self, callback):
         if callback not in self._clients:
             self._clients.append(callback)
-        self._start_reporting()
-
+        self.start_reporting()
+    @log_call
     def remove_client(self, callback):
         if callback in self._clients:
             self._clients.remove(callback)
         if not self._clients:
-            self._stop_reporting()
+            self.stop_reporting()
 
     # ---- G-Code Commands ----
+    @log_call
     def cmd_dump(self, gcmd):
-        logging.warning(f">>> CS1237: cmd_dump called")
+        logging.info("CS1237: cmd_dump called")
         e = gcmd.get_int('E', 0, minval=0, maxval=1)
         t = gcmd.get_float('T', 1.0, minval=0.1, maxval=1.0)
         s = gcmd.get_int('S', SELF_CHECK_STATE, minval=SELF_CHECK_STATE, maxval=HEAD_BLOCK_STATE)
@@ -274,82 +374,119 @@ class CS1237:
         if e:
            # Tell the host proxy to start reports
             self._enable_cs1237(1)
-            self._start_reporting()
+            self.start_reporting()
            # Then instruct MCU to report cs1237_state every T seconds
-            self._check_start(t, s, sens)
+            self._check_start(t, s, sens, 0)
         else:
            # First tell MCU to stop cs1237_state messages
             self._check_stop(s)
            # Then tell the host proxy to stop reporting
-            self._stop_reporting()
+            self.stop_reporting()
             self._enable_cs1237(0)
-
+    @log_call
     def cmd_g9121(self, gcmd):
         e = gcmd.get_int('E', 0, minval=0, maxval=1)
+        r = gcmd.get_int('R', 0, minval=0, maxval=1)
+        self._reporting = r > 0
+        t = gcmd.get_float('T', 1.0, minval=0.1, maxval=1.0)
+        
         if e:
-            self._check_start(
-                gcmd.get_float('T', 1.0, minval=0.1, maxval=1.0),
-                SCRATCH_STATE,
-                self.scratch_sensitivity
-            )
+            self._check_start(t, SCRATCH_STATE, self.scratch_sensitivity, 0)
         else:
             self._check_stop(SCRATCH_STATE)
-
+    
+    @log_call
     def cmd_g9122(self, gcmd):
         e = gcmd.get_int('E', 0, minval=0, maxval=1)
+        r = gcmd.get_int('R', 0, minval=0, maxval=1)
+        self._reporting = r > 0
+        t = gcmd.get_float('T', 1.0, minval=0.1, maxval=1.0)
+        
         if e:
-            self._check_start(
-                gcmd.get_float('T', 1.0, minval=0.1, maxval=1.0),
-                SELF_CHECK_STATE,
-                self.self_check_sensitivity
-            )
+            self._check_start(t, SELF_CHECK_STATE, self.self_check_sensitivity, 0)
         else:
             self._check_stop(SELF_CHECK_STATE)
 
+    @log_call
     def cmd_g9123(self, gcmd):
-        w = gcmd.get_int('W', 0, minval=0, maxval=3)
-        self._query_complete = self.printer.get_reactor().Completion()
-        self.cmd_checkself.send([
-            self._oid,
-            w
-        ])
-        params = self._query_complete.Wait(
-            self.printer.get_reactor().monotonic() + 2, None
-        )
-        if params:
-            self.checkself_flag = int(params.get('flag', 0))
+        reactor = self.printer.get_reactor()
+        params = None
+        try:
+            w = gcmd.get_int('W', 0, minval=0, maxval=3)
+            self._query_complete = reactor.completion()
+            self.cmd_checkself.send([self._oid, w])
+
+            params = self._query_complete.wait(reactor.monotonic() + 2.0)
+            if params:
+                self.checkself_flag = int(params.get('flag', 0))
+                gcode = self.printer.lookup_object('gcode')
+                gcode.respond_info(f"NozzleTestFlag:{self.checkself_flag}")
+        finally:
+            self._query_complete = None
+
 
     # ---- Internal Helpers ----
-    def _check_start(self, period, ctype, sens):
-        ticks = self.mcu.seconds_to_clock(period)
+    def _check_start(self, check_period, check_type, sensitivity, delay_send_time=0):
+        ticks = self.mcu.seconds_to_clock(check_period)
+        delay_t = self.mcu.seconds_to_clock(delay_send_time) if delay_send_time else 0
+        
         self.cmd_start_report.send([
             self._oid,
             1,
             ticks,
-            0,
-            sens
-        ])
+            check_type,
+            sensitivity
+        ], minclock=delay_t)
 
-    def _check_stop(self, ctype):
+    def _check_stop(self, check_type):
         self.cmd_start_report.send([
             self._oid,
             0,
             0,
-            0,
+            check_type,
             0
         ])
 
     # ---- Startup Self-Check ----
     def _self_check_sequence(self, _args):
-        self._check_start(1.0, SELF_CHECK_STATE, self.self_check_sensitivity)
-        self.printer.send_event('cs1237:test_resonances', None)
-        self.printer.get_reactor().Pause(
+        # Reset before self-check
+        self._cmd_reset.send([self._oid, 3])
+        
+        # Small delay after reset
+        self.printer.get_reactor().pause(
+            self.printer.get_reactor().monotonic() + 0.1
+        )
+        
+        self._check_start(1.0, SELF_CHECK_STATE, self.self_check_sensitivity, 0)
+        
+        self._self_check_resonances()
+        
+        # Wait for moves to complete
+        toolhead = self.printer.lookup_object('toolhead')
+        toolhead.wait_moves()
+        
+        # Pause for 3 seconds to collect data
+        self.printer.get_reactor().pause(
             self.printer.get_reactor().monotonic() + 3.0
         )
+        
+        # Stop the check
         self._check_stop(SELF_CHECK_STATE)
+        
+        # Check result and raise error if needed
         if self.sensor_state == SELF_CHECK_ERR:
             raise Exception("CS1237 boot up self-check failed")
-
+    @log_call
+    def _self_check_resonances(self):
+        try:
+            gcode = self.printer.lookup_object('gcode')
+            toolhead = self.printer.lookup_object('toolhead')
+            pos = toolhead.get_position()
+            
+            cmd = f"SPECIALIZED_TEST_RESONANCES axis=x FREQ_START=45 FREQ_END=55 HZ_PER_SEC=10 POINT={pos[0]},{pos[1]},{pos[2]}"
+            gcode.run_script_from_command(cmd)
+        except Exception:
+            logging.exception("CS1237: Error running resonance test")
 
 def load_config(config):
     return CS1237(config)

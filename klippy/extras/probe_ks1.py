@@ -1,4 +1,4 @@
-# KS1 Custom Probe support (utilizingKlipper probe helpers)
+# KS1 Custom Probe support (utilizing Klipper probe helpers)
 #
 # Copyright (C) 2025 Antiriad <mail.antiriad@gmail.com>
 #
@@ -6,66 +6,82 @@
 
 import logging
 from . import probe
+from functools import wraps
 
+# Decorator to log method calls
+def log_call(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        logging.warning(f"[{func.__qualname__}] called")
+        return func(*args, **kwargs)
+    return wrapper
+def noop(func):
+    return func
+
+ENABLE_LOGGING = False  # True
+log_call = log_call if ENABLE_LOGGING else noop
 
 class ProbeKS1:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.name = config.get_name()
+        
+        self.speed = config.getfloat("speed", 5.0, above=0.0)
+        self.lift_speed = config.getfloat("lift_speed", self.speed, above=0.0)
+        self.x_offset = config.getfloat("x_offset", 0.0)
+        self.y_offset = config.getfloat("y_offset", 0.0)
+        self.z_offset = config.getfloat("z_offset", 0.0)
 
-        # --- Klipper probe helper integration ---
-        # Wrap the endstop pin in ProbeEndstopWrapper (handles MCU setup, deploy/stow, multi-probe)
+        # Currently not used/supported settings from printer.cfg
+        # As this module uses probehelper for probing and not the manual aproach in this module
+        # this settings are currently without any effect. They are left active here, so that
+        # its still possible to load a standard KS1 probe config without getting klipper complaining
+        # about this unused keys. 
+        self.z_offset = config.getfloat("z_offset", 0.0)
+        self.final_speed = config.getfloat("final_speed", 2.0, above=0.0)
+
+        # Z position inference
+        if config.has_section("stepper_z"):
+            zconfig = config.getsection("stepper_z")
+            self.z_position = zconfig.getfloat("position_min", 0.0)
+        else:
+            pconfig = config.getsection("printer")
+            self.z_position = pconfig.getfloat("minimum_z_position", 0.0)
+        
+        self.z_position = config.getfloat("z_position", self.z_position)
+
+
+        # CS1237 strain gauge sensor reference
+        # Currently not used, as it enables itself and start reporting as soon as klippy connects
+        #self.cs1237 = self.printer.lookup_object('cs1237')
+        
+
+        # Standard Klipper probe endstop (MCU handles triggering)
         self.mcu_endstop = probe.ProbeEndstopWrapper(config)
 
-        # Query and stepper methods
-        self.get_mcu       = self.mcu_endstop.get_mcu
-        self.add_stepper   = self.mcu_endstop.add_stepper
-        self.get_steppers  = self.mcu_endstop.get_steppers
+        # Standard probe methods
+        self.get_mcu = self.mcu_endstop.get_mcu
+        self.add_stepper = self.mcu_endstop.add_stepper
+        self.get_steppers = self.mcu_endstop.get_steppers
+        self.home_start = self.mcu_endstop.home_start
+        self.home_wait = self.mcu_endstop.home_wait
+        
+        # Use MCU triggering
         self.query_endstop = self.mcu_endstop.query_endstop
-        # Homing uses wrapper's methods for correct signatures
-        self.home_start    = self.mcu_endstop.home_start
-        self.home_wait     = self.mcu_endstop.home_wait
-
-        # CS1237 strain gauge sensor
-        self.cs1237       = self.printer.lookup_object('cs1237')
-        self.threshold    = config.getfloat('sensitivity', self.cs1237.scratch_sensitivity)
-
-        # Override endstop query to include ADC threshold first
-        orig_query = self.mcu_endstop.query_endstop
-
-        def custom_query(timestamp):
-            adc_val = self.cs1237.adc_value
-            if adc_val is not None and adc_val >= self.threshold:
-                return 1
-            return orig_query(timestamp)
-        self.mcu_endstop.query_endstop = custom_query
-        self.query_endstop = custom_query
 
         # Standard Klipper probe helpers
-        # (Note: digital probe now stops on ADC threshold via custom query)
-        self.cmd_helper    = probe.ProbeCommandHelper(config, self, self.query_endstop)
+        self.cmd_helper = probe.ProbeCommandHelper(config, self, self.query_endstop)
         self.probe_offsets = probe.ProbeOffsetsHelper(config)
-        self.param_helper  = probe.ProbeParameterHelper(config)
+        self.param_helper = probe.ProbeParameterHelper(config)
         self.homing_helper = probe.HomingViaProbeHelper(config, self, self.param_helper)
+        
         self.probe_session = probe.ProbeSessionHelper(
             config, self.param_helper, self.homing_helper.start_probe_session)
+        
+        # Register as the printer's probe object,so probe_k1 gets registred as standard probe
         config.get_printer().add_object('probe', self)
-        # --- end helper integration ---
-
-        # KS1-specific parameters
-        self.speed                = config.getfloat("speed", 5.0)
-        self.lift_speed           = config.getfloat("lift_speed", self.speed)
-        self.x_offset             = config.getfloat("x_offset", 0.0)
-        self.y_offset             = config.getfloat("y_offset", 0.0)
-        self.z_offset             = config.getfloat("z_offset", 0.0)
-        self.final_speed          = config.getfloat("final_speed", 2.0)
-        self.sample_count         = config.getint("samples", 1)
-        self.sample_retract_dist  = config.getfloat("sample_retract_dist", 2.0)
-        self.samples_tolerance    = config.getfloat("samples_tolerance", 0.100)
-        self.samples_retries      = config.getint("samples_tolerance_retries", 0)
-        self.samples_result       = config.getchoice(
-            "samples_result", ["median", "average", "weighted"], "average")
-
+        
+           
     # Interface for ProbeCommandHelper
     def get_probe_params(self, gcmd=None):
         return self.param_helper.get_probe_params(gcmd)
@@ -73,151 +89,84 @@ class ProbeKS1:
     def get_offsets(self):
         return self.probe_offsets.get_offsets()
 
+    #@log_call
     def get_status(self, eventtime):
         return self.cmd_helper.get_status(eventtime)
 
+    @log_call
     def start_probe_session(self, gcmd):
         return self.probe_session.start_probe_session(gcmd)
 
-    # No physical deploy/retract: always at nozzle
-    def probe_prepare(self, hmove, *args, **kwargs):
-        #logging.warning("ProbeKS1: probe_prepare")
-        self.cs1237._enable_cs1237(1)
-        self.cs1237._start_reporting()
-        self.mcu_endstop.probe_prepare(hmove)
+    @log_call    
+    def get_position_endstop(self):
+        return self.z_offset
 
-    def probe_finish(self, hmove, *args, **kwargs):
-        #logging.warning("ProbeKS1: probe_finish")
-        self.cs1237._stop_reporting
-        self.cs1237._enable_cs1237(0)
-        self.mcu_endstop.probe_finish(hmove)
-
-    def multi_probe_begin(self):
-        #logging.warning("ProbeKS1: multi_probe_begin")
-        self.mcu_endstop.multi_probe_begin()
-
-    def multi_probe_end(self):
-        #logging.warning("ProbeKS1: multi_probe_end")
-        self.mcu_endstop.multi_probe_end()
-
+    @log_call
     def get_lift_speed(self, gcmd=None):
         if gcmd is not None:
-            return gcmd.get_float("LIFT_SPEED", self.lift_speed)
+            return gcmd.get_float("LIFT_SPEED", self.lift_speed, above=0.0)
         return self.lift_speed
 
+    @log_call
+    # Probe lifecycle methods
+    def probe_prepare(self, hmove):
+        """Ensure endstop isn't already triggered before probing."""
+        toolhead = self.printer.lookup_object("toolhead")
+        reactor = self.printer.get_reactor()
+
+        # Ask MCU slightly IN THE FUTURE to avoid stale/latched state
+        def _is_endstop_active():
+            pt = toolhead.get_last_move_time() + 0.050  # 50 ms in the future
+            try:
+                return bool(self.mcu_endstop.query_endstop(pt))
+            except Exception:
+                return False
+
+        # Debounced check: read twice with a short gap
+        pre_trig_1 = _is_endstop_active()
+        if pre_trig_1:
+            reactor.pause(reactor.monotonic() + 0.030)  # 30 ms settle
+            pre_trig_2 = _is_endstop_active()
+        else:
+            pre_trig_2 = False
+
+        if pre_trig_1 and pre_trig_2:
+            logging.warning("ProbeKS1: endstop TRIGGERED before move; lifting 2mm to clear")
+            cur = toolhead.get_position()
+            toolhead.manual_move([cur[0], cur[1], cur[2] + 2.0], self.get_lift_speed(None))
+            toolhead.wait_moves()
+            # Re-check once more after lift
+            if _is_endstop_active():
+                raise self.printer.command_error(
+                    "ProbeKS1: Endstop still triggered before probing after 2mm lift "
+                )
+
+        # Delegate to standard probe preparation
+        self.mcu_endstop.probe_prepare(hmove)
+
+    @log_call
+    def probe_finish(self, hmove):
+        self.mcu_endstop.probe_finish(hmove)
+
+    @log_call    
+    def multi_probe_begin(self):
+        self.mcu_endstop.multi_probe_begin()
+
+    @log_call
+    def multi_probe_end(self):
+        self.mcu_endstop.multi_probe_end()
+    @log_call        
     def raise_probe(self):
-        logging.warning("ProbeKS1: raise_probe() (no-op)")
-
+        # No-op for strain gauge probe (always active)
+        pass
+    @log_call
     def lower_probe(self):
-        logging.warning("ProbeKS1: lower_probe() (no-op)")
+        # No-op for strain gauge probe (always active)
+        pass
 
-    def probe(self, speed):
-        logging.warning("ProbeKS1: probe")
-        toolhead = self.printer.lookup_object("toolhead")
-        curtime = self.printer.get_reactor().monotonic()
-        if "z" not in toolhead.get_status(curtime)["homed_axes"]:
-            raise self.printer.command_error("Must home before probe")
-
-        pos = list(toolhead.get_position())
-        pos[2] = self.z_offset
-        phoming = self.printer.lookup_object("homing")
-        epos = phoming.probing_move(self.mcu_endstop, pos, speed)
-
-        # Wait for ADC threshold or digital endstop
-        #logging.warning(f"[ProbeKS1] cs1237={cs1237}")
-        while True:
-            adc = self.cs1237.adc_value
-            #logging.warning(f"[ProbeKS1] Strain gauge ADC={adc}, threshold={self.threshold}")
-            if adc is not None and adc >= self.threshold:
-                #logging.warning(f"[ProbeKS1] Probe triggered by ADC: {adc}")
-                break
-            state = self.query_endstop(self.printer.get_reactor().monotonic())
-            if state:
-                #logging.warning("[ProbeKS1] Probe triggered (digital)")
-                break
-
-        self.last_z_result = epos[2]
-        return epos[:3]
-
-    def run_probe(self, gcmd):
-        #logging.warning("ProbeKS1: run_probe")
-        try:
-            initial = self.cs1237.adc_value
-            gcmd.respond_info(f"[ProbeKS1] [DEBUG] Initial ADC={initial}")
-        except Exception as e:
-            gcmd.respond_info(f"[ProbeKS1] [DEBUG] ADC error: {e}")
-
-        params = self.get_probe_params(gcmd)
-        speed = params['probe_speed']
-        lift_speed = params['lift_speed']
-        cnt = params['samples']
-        retract = params['sample_retract_dist']
-        tol = params['samples_tolerance']
-        retries = params['samples_tolerance_retries']
-        result_type = params['samples_result']
-
-        self.multi_probe_begin()
-        samples = []
-        attempts = 0
-        toolhead = self.printer.lookup_object("toolhead")
-        xy = toolhead.get_position()[:2]
-
-        while len(samples) < cnt:
-            try:
-                before = self.cs1237.adc_value
-                gcmd.respond_info(f"[ProbeKS1] [DEBUG] Before probe #{len(samples)+1} ADC={before}")
-            except Exception as e:
-                gcmd.respond_info(f"[ProbeKS1] [DEBUG] ADC error: {e}")
-
-            spd = speed if not samples else self.final_speed
-            sample = self.probe(spd)
-
-            try:
-                after = self.cs1237.adc_value
-                gcmd.respond_info(f"[ProbeKS1] [DEBUG] After probe ADC={after}")
-            except Exception as e:
-                gcmd.respond_info(f"[ProbeKS1] [DEBUG] ADC error: {e}")
-
-            samples.append(sample)
-            zs = [s[2] for s in samples]
-            if max(zs) - min(zs) > tol:
-                if attempts >= retries:
-                    raise self.printer.command_error("Probe samples exceed tolerance")
-                gcmd.respond_info("[ProbeKS1] Probe samples exceed tolerance. Retrying...")
-                attempts += 1
-                samples.clear()
-                continue
-
-            if len(samples) < cnt:
-                self.move([xy[0], xy[1], sample[2] + retract], lift_speed)
-
-        self.multi_probe_end()
-
-        if result_type == 'median':
-            return self.calc_median(samples)
-        if result_type == 'weighted':
-            return self.calc_weighted(samples)
-        return self.calc_mean(samples)
-
+    @log_call
     def move(self, coord, speed):
         self.printer.lookup_object("toolhead").manual_move(coord, speed)
-
-    def calc_mean(self, vals):
-        c = float(len(vals))
-        return [sum(v[i] for v in vals) / c for i in range(3)]
-
-    def calc_weighted(self, vals):
-        if len(vals) == 2:
-            return [(vals[0][i] * 2 + vals[1][i] * 3) * 0.2 for i in range(3)]
-        return self.calc_mean(vals)
-
-    def calc_median(self, vals):
-        s = sorted(vals, key=lambda v: v[2])
-        mid = len(s) // 2
-        if len(s) % 2:
-            return s[mid]
-        return self.calc_mean(s[mid-1:mid+1])
-
-
+@log_call
 def load_config(config):
     return ProbeKS1(config)
