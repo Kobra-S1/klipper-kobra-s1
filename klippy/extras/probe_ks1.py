@@ -6,20 +6,6 @@
 
 import logging
 from . import probe
-from functools import wraps
-
-# Decorator to log method calls
-def log_call(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        logging.warning(f"[{func.__qualname__}] called")
-        return func(*args, **kwargs)
-    return wrapper
-def noop(func):
-    return func
-
-ENABLE_LOGGING = False  # True
-log_call = log_call if ENABLE_LOGGING else noop
 
 class ProbeKS1:
     def __init__(self, config):
@@ -89,25 +75,20 @@ class ProbeKS1:
     def get_offsets(self):
         return self.probe_offsets.get_offsets()
 
-    #@log_call
     def get_status(self, eventtime):
         return self.cmd_helper.get_status(eventtime)
 
-    @log_call
     def start_probe_session(self, gcmd):
         return self.probe_session.start_probe_session(gcmd)
 
-    @log_call    
     def get_position_endstop(self):
         return self.z_offset
 
-    @log_call
     def get_lift_speed(self, gcmd=None):
         if gcmd is not None:
             return gcmd.get_float("LIFT_SPEED", self.lift_speed, above=0.0)
         return self.lift_speed
 
-    @log_call
     # Probe lifecycle methods
     def probe_prepare(self, hmove):
         """Ensure endstop isn't already triggered before probing."""
@@ -144,29 +125,25 @@ class ProbeKS1:
         # Delegate to standard probe preparation
         self.mcu_endstop.probe_prepare(hmove)
 
-    @log_call
     def probe_finish(self, hmove):
         self.mcu_endstop.probe_finish(hmove)
 
-    @log_call    
     def multi_probe_begin(self):
         self.mcu_endstop.multi_probe_begin()
 
-    @log_call
     def multi_probe_end(self):
         self.mcu_endstop.multi_probe_end()
-    @log_call        
+
     def raise_probe(self):
         # No-op for strain gauge probe (always active)
         pass
-    @log_call
+
     def lower_probe(self):
         # No-op for strain gauge probe (always active)
         pass
 
-    @log_call
     def move(self, coord, speed):
         self.printer.lookup_object("toolhead").manual_move(coord, speed)
-@log_call
+
 def load_config(config):
     return ProbeKS1(config)
