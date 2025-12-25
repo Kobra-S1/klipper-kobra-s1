@@ -73,19 +73,21 @@ class CS1237:
 
         # Register G-code commands
         gcode = self.printer.lookup_object('gcode')
-        gcode.register_command('CS1237',       self.cmd_dump, when_not_ready=False, desc='')
+        # Note: Klipper's extended command parser rejects digits inside names;
+        # use digit-free aliases for this module.
+        gcode.register_command('CS_ADC',      self.cmd_dump, when_not_ready=False, desc='')
         gcode.register_command('G9121',       self.cmd_g9121, False, '')
         gcode.register_command('G9122',       self.cmd_g9122, False, '')
         gcode.register_command('G9123',       self.cmd_g9123, False, '')
-        gcode.register_command('CS1237_DUMP', self.cmd_dump, False, 'debug CS1237 DUMP')
+        gcode.register_command('CS_ADC_DUMP', self.cmd_dump, False, 'debug CS1237 DUMP')
 
         # Dedicated MCU test commands
-        gcode.register_command('CS1237_CHECKSELF', self.cmd_checkself_cs1237, False, 'Trigger checkself_cs1237 MCU command')
-        gcode.register_command('CS1237_CONFIG', self.cmd_config_cs1237, False, 'Trigger config_cs1237 MCU command')
-        gcode.register_command('CS1237_RESET', self.cmd_reset_cs1237, False, 'Trigger reset_cs1237 MCU command')
-        gcode.register_command('CS1237_REPORT', self.cmd_start_cs1237_report, False, 'Trigger start_cs1237_report MCU command')
-        gcode.register_command('CS1237_DIFF', self.cmd_query_cs1237_diff, False, 'Trigger query_cs1237_diff MCU command')
-        gcode.register_command('CS1237_ENABLE', self.cmd_enable_cs1237, False, 'Trigger enable_cs1237 MCU command')
+        gcode.register_command('CS_ADC_CHECKSELF', self.cmd_checkself_cs1237, False, 'Trigger checkself_cs1237 MCU command')
+        gcode.register_command('CS_ADC_CONFIG',    self.cmd_config_cs1237, False, 'Trigger config_cs1237 MCU command')
+        gcode.register_command('CS_ADC_RESET',     self.cmd_reset_cs1237, False, 'Trigger reset_cs1237 MCU command')
+        gcode.register_command('CS_ADC_REPORT',    self.cmd_start_cs1237_report, False, 'Trigger start_cs1237_report MCU command')
+        gcode.register_command('CS_ADC_DIFF',      self.cmd_query_cs1237_diff, False, 'Trigger query_cs1237_diff MCU command')
+        gcode.register_command('CS_ADC_ENABLE',    self.cmd_enable_cs1237, False, 'Trigger enable_cs1237 MCU command')
         
         # Register event handlers
         self.printer.register_event_handler('project:ready', self._handle_ready)
@@ -141,6 +143,7 @@ class CS1237:
     def cmd_enable_cs1237(self, gcmd):
         state = gcmd.get_int('STATE', 1, minval=0, maxval=1)
         self._enable_cs1237(state)
+        gcmd.respond_info(f"CS_ADC_ENABLE state={state}")
 
     def _enable_cs1237(self, state=1):
         self._cmd_enable.send([self._oid, state])
@@ -154,6 +157,7 @@ class CS1237:
             w
         ])
         logging.info(f"[CS1237] Sent checkself_cs1237 with W={w}")
+        gcmd.respond_info(f"CS_ADC_CHECKSELF sent W={w}")
     def cmd_config_cs1237(self, gcmd):
         cfg = (
             f"config_cs1237 oid={self._oid} "
@@ -161,6 +165,7 @@ class CS1237:
             f"register={self.register_address} sensitivity={self.sensitivity}"
         )
         self.mcu.add_config_cmd(cfg)
+        gcmd.respond_info("CS_ADC_CONFIG queued")
 
     def cmd_reset_cs1237(self, gcmd):
         count = gcmd.get_int('COUNT', 3, minval=1, maxval=10)
@@ -168,6 +173,7 @@ class CS1237:
             self._oid,
             count
         ])
+        gcmd.respond_info(f"CS_ADC_RESET sent count={count}")
 
     def cmd_start_cs1237_report(self, gcmd):
         ticks = gcmd.get_int('TICKS', self.mcu.seconds_to_clock(1.0 / self._samples_per_second))
@@ -180,6 +186,7 @@ class CS1237:
             print_state,
             sensitivity
         ])
+        gcmd.respond_info(f"CS_ADC_REPORT enable=1 ticks={ticks} state={print_state} sens={sensitivity}")
 
     def cmd_query_cs1237_diff(self, gcmd):
         diff_cmd = self.mcu.lookup_command("query_cs1237_diff oid=%c")
@@ -187,6 +194,7 @@ class CS1237:
             self._oid
         ])
         self.printer.register_event_handler('cs1237:self_check', self._self_check_sequence)
+        gcmd.respond_info("CS_ADC_DIFF requested")
 
     def _build_config(self):
         self._oid = self.mcu.create_oid()
@@ -344,12 +352,14 @@ class CS1237:
             self.start_reporting()
            # Then instruct MCU to report cs1237_state every T seconds
             self._check_start(t, s, sens, 0)
+            gcmd.respond_info(f"CS_ADC reporting enabled state={s} sens={sens} period={t}")
         else:
            # First tell MCU to stop cs1237_state messages
             self._check_stop(s)
            # Then tell the host proxy to stop reporting
             self.stop_reporting()
             self._enable_cs1237(0)
+            gcmd.respond_info("CS_ADC reporting disabled")
 
     def cmd_g9121(self, gcmd):
         e = gcmd.get_int('E', 0, minval=0, maxval=1)
