@@ -59,7 +59,8 @@ class ProbeKS1:
         self.cmd_helper = probe.ProbeCommandHelper(config, self, self.query_endstop)
         self.probe_offsets = probe.ProbeOffsetsHelper(config)
         self.param_helper = probe.ProbeParameterHelper(config)
-        self.homing_helper = probe.HomingViaProbeHelper(config, self, self.param_helper)
+        self.homing_helper = probe.HomingViaProbeHelper(
+            config, self, self.probe_offsets, self.param_helper)
         
         self.probe_session = probe.ProbeSessionHelper(
             config, self.param_helper, self.homing_helper.start_probe_session)
@@ -72,8 +73,8 @@ class ProbeKS1:
     def get_probe_params(self, gcmd=None):
         return self.param_helper.get_probe_params(gcmd)
 
-    def get_offsets(self):
-        return self.probe_offsets.get_offsets()
+    def get_offsets(self, gcmd=None):
+        return self.probe_offsets.get_offsets(gcmd)
 
     def get_status(self, eventtime):
         return self.cmd_helper.get_status(eventtime)
