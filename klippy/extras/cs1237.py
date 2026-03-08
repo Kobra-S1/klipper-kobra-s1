@@ -205,12 +205,6 @@ class CS1237:
         )
         self._cmd_enable = self.mcu.lookup_command("enable_cs1237 oid=%c state=%c")
         self._cmd_reset  = self.mcu.lookup_command("reset_cs1237 oid=%c count=%c")
-        self._cmd_calibration_phase = self.mcu.lookup_command(
-            "cs1237_calibration_phase oid=%c cali_state=%c speed_state=%c"
-        )
-        self._cmd_calibration_data_process = self.mcu.lookup_command(
-            "cs1237_calibration_DataProcess oid=%c"
-        )
 
         # Ensure sensor is disabled after config (guards against warm restart
         # leaving EXTI enabled and level_out pin in stale triggered state)
