@@ -8,6 +8,17 @@ All dates in this document are approximate.
 
 ## Changes
 
+20260214: The `MANUAL_STEPPER` G-Code command `STOP_ON_ENDSTOP`
+parameter has changed. See the
+[MANUAL_STEPPER](G-Codes.md#manual_stepper) documentation for
+details. Using the previous integer values (-2, -1, 1, 2) is
+deprecated and support will be removed in the near future.
+
+20260207: The low-level i2c behavior of sx1509 and uc1701 devices has
+changed. Previously an i2c error would result in a shutdown, and now
+i2c errors when communicating with these devices will only generate
+warnings in the log file.
+
 20260109: The status value `{printer.probe.last_z_result}` is
 deprecated; it will be removed in the near future. Use
 `{printer.probe.last_probe_position}` instead, and note that this new

@@ -38,7 +38,7 @@ def calc_probe_z_average(positions, method='average'):
 # Helper to implement common probing commands
 class ProbeCommandHelper:
     def __init__(self, config, probe, query_endstop=None,
-                 replace_z_offset=False):
+                 can_set_z_offset=True):
         self.printer = config.get_printer()
         self.probe = probe
         self.query_endstop = query_endstop
@@ -55,16 +55,16 @@ class ProbeCommandHelper:
                                desc=self.cmd_PROBE_help)
         # PROBE_CALIBRATE command
         self.probe_calibrate_info = None
-        gcode.register_command('PROBE_CALIBRATE', self.cmd_PROBE_CALIBRATE,
-                               desc=self.cmd_PROBE_CALIBRATE_help)
+        if can_set_z_offset:
+            gcode.register_command('PROBE_CALIBRATE', self.cmd_PROBE_CALIBRATE,
+                                   desc=self.cmd_PROBE_CALIBRATE_help)
         # Other commands
         gcode.register_command('PROBE_ACCURACY', self.cmd_PROBE_ACCURACY,
                                desc=self.cmd_PROBE_ACCURACY_help)
-        if replace_z_offset:
-            return
-        gcode.register_command('Z_OFFSET_APPLY_PROBE',
-                               self.cmd_Z_OFFSET_APPLY_PROBE,
-                               desc=self.cmd_Z_OFFSET_APPLY_PROBE_help)
+        if can_set_z_offset:
+            gcode.register_command('Z_OFFSET_APPLY_PROBE',
+                                   self.cmd_Z_OFFSET_APPLY_PROBE,
+                                   desc=self.cmd_Z_OFFSET_APPLY_PROBE_help)
     def _move(self, coord, speed):
         self.printer.lookup_object('toolhead').manual_move(coord, speed)
     def get_status(self, eventtime):
@@ -379,7 +379,9 @@ class ProbeSessionHelper:
                 reason += HINT_TIMEOUT
             raise self.printer.command_error(reason)
         # Allow axis_twist_compensation to update results
-        self.printer.send_event("probe:update_results", [epos])
+        results = [epos]
+        self.printer.send_event("probe:update_results", results)
+        epos = results[0]
         # Report results
         gcode = self.printer.lookup_object('gcode')
         gcode.respond_info("probe: at %.3f,%.3f bed will contact at z=%.6f"

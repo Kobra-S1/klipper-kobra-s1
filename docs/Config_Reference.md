@@ -743,7 +743,7 @@ max_accel:
 
 ```
 
-Then a user must define three carriages for X, Y, and Z axes, e.g.:
+Then a user must define three primary carriages for X, Y, and Z axes, e.g.:
 ```
 [carriage carriage_x]
 axis:
@@ -1923,6 +1923,39 @@ Support for LIS3DH accelerometers.
 #   See the "adxl345" section for information on this parameter.
 ```
 
+### [bmi160]
+
+BMI160 accelerometer. This sensor can be queried via I2C or SPI bus.
+```
+[bmi160]
+#i2c_address:
+#   Default is 105 (0x69). If SA0 is tied to GND, use 104 (0x68).
+#   Only used for I2C.
+#i2c_mcu:
+#i2c_bus:
+#i2c_speed:
+#   See the "common I2C settings" section for a description of the
+#   above parameters. Only used for I2C.
+#cs_pin:
+#spi_speed:
+#spi_bus:
+#spi_software_sclk_pin:
+#spi_software_mosi_pin:
+#spi_software_miso_pin:
+#   See the "common SPI settings" section for a description of the
+#   above parameters. Only used for SPI.
+#axes_map: x, y, z
+#   See the "adxl345" section for information on this parameter.
+```
+
+**Important:** Many BMI160 modules use ambiguous pin labels. For SPI:
+- Use **SCL** for clock (not SCX)
+- Use **SDA** for MOSI (not SDX)
+- Use **SA0** for MISO
+- Use **CS** for chip select
+
+The pins labeled SCX/SDX are for the auxiliary magnetometer bus.
+
 ### [mpu9250]
 
 Support for MPU-9250, MPU-9255, MPU-6515, MPU-6050, and MPU-6500
@@ -2293,6 +2326,16 @@ sensor_type: ldc1612
 #samples_tolerance:
 #samples_tolerance_retries:
 #   See the "probe" section for information on these parameters.
+#tap_threshold:
+#   Noise cutoff/stop trigger threshold (in Hz). Specify this value to
+#   enable support for "METHOD=tap" probe commands. See Eddy_Probe.md
+#   for more information. Larger values make the tap detection less
+#   sensitive. That is, larger values make it less likely the toolhead
+#   will incorrectly stop early due to noise, while increasing the
+#   risk of the toolhead not correctly stopping when it first contacts
+#   the bed. If this value is specified then one may override its
+#   value at run-time using the "TAP_THRESHOLD" parameter on probe
+#   commands. The default is to not enable support for "tap" probing.
 ```
 
 ### [axis_twist_compensation]
@@ -2452,10 +2495,16 @@ Please note that in this case the `[dual_carriage]` configuration deviates
 from the configuration described above:
 ```
 [dual_carriage my_dc_carriage]
-primary_carriage:
-#   Defines the matching primary carriage of this dual carriage and
-#   the corresponding IDEX axis. Must match a name of a defined `[carriage]`.
-#   This parameter must be provided.
+#primary_carriage:
+#   Defines the matching carriage on the same gantry as this dual carriage and
+#   the corresponding dual axis. Must match a name of a defined `[carriage]` or
+#   another independent `[dual_carriage]`. If not set, which is a default,
+#   defines a dual carriage independent of a `[carriage]` with the same axis
+#   as this one (e.g. on a different gantry).
+#axis:
+#   Axis of a carriage, either x or y. If 'primary_carriage' is defined, then
+#   this parameter defaults to the 'axis' parameter of that primary carriage,
+#   otherwise this parameter must be defined.
 #safe_distance:
 #   The minimum distance (in mm) to enforce between the dual and the primary
 #   carriages. If a G-Code command is executed that will bring the carriages
@@ -2464,7 +2513,8 @@ primary_carriage:
 #   position_min and position_max for the dual and primary carriages. If set
 #   to 0 (or safe_distance is unset and position_min and position_max are
 #   identical for the primary and dual carriages), the carriages proximity
-#   checks will be disabled.
+#   checks will be disabled. Only valid for a dual_carriage with a defined
+#   'primary_carriage'.
 endstop_pin:
 #position_min:
 position_endstop:
@@ -4153,6 +4203,7 @@ run_current:
 #driver_SEDN: 0
 #driver_SEIMIN: 0
 #driver_SFILT: 0
+#driver_SG4_THRS: 0
 #driver_SG4_ANGLE_OFFSET: 1
 #driver_SLOPE_CONTROL: 0
 #   Set the given register during the configuration of the TMC2240
@@ -4166,8 +4217,8 @@ run_current:
 #   is "active low" and is thus normally prefaced with "^!". Setting
 #   this creates a "tmc2240_stepper_x:virtual_endstop" virtual pin
 #   which may be used as the stepper's endstop_pin. Doing this enables
-#   "sensorless homing". (Be sure to also set driver_SGT to an
-#   appropriate sensitivity value.) The default is to not enable
+#   "sensorless homing". (Be sure to also set driver_SGT OR driver_SG4_THRS
+#   to an appropriate sensitivity value.) The default is to not enable
 #   sensorless homing.
 ```
 
