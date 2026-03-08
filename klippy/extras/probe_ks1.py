@@ -37,10 +37,10 @@ class ProbeKS1:
         self.z_position = config.getfloat("z_position", self.z_position)
 
 
-        # CS1237 strain gauge sensor reference
-        # Currently not used, as it enables itself and start reporting as soon as klippy connects
-        #self.cs1237 = self.printer.lookup_object('cs1237')
-        
+        # CS1237 strain gauge sensor reference (deferred to connect handler)
+        self.cs1237 = None
+        self.printer.register_event_handler('klippy:connect',
+                                            self._handle_connect)
 
         # Standard Klipper probe endstop (MCU handles triggering)
         self.mcu_endstop = probe.ProbeEndstopWrapper(config)
@@ -69,6 +69,14 @@ class ProbeKS1:
         config.get_printer().add_object('probe', self)
         
            
+    def _handle_connect(self):
+        self.cs1237 = self.printer.lookup_object('cs1237', None)
+        if self.cs1237 is None:
+            raise self.printer.config_error(
+                "ProbeKS1: [cs1237] section not found in printer config. "
+                "The strain gauge sensor is required for safe probing.")
+        logging.info("ProbeKS1: cs1237 sensor connected")
+
     # Interface for ProbeCommandHelper
     def get_probe_params(self, gcmd=None):
         return self.param_helper.get_probe_params(gcmd)
@@ -130,10 +138,22 @@ class ProbeKS1:
         self.mcu_endstop.probe_finish(hmove)
 
     def multi_probe_begin(self):
+        # Enable CS1237 strain gauge sensor for the probe session
+        logging.info("ProbeKS1: multi_probe_begin called")
+        # Reset sensor baseline before enabling for a fresh reference
+        self.cs1237._cmd_reset.send([self.cs1237._oid, 3])
+        self.cs1237._enable_cs1237(1)
+        # 500ms stabilization dwell for EMA filter convergence
+        gcode = self.printer.lookup_object('gcode')
+        gcode.run_script_from_command('G4 P500')
         self.mcu_endstop.multi_probe_begin()
 
     def multi_probe_end(self):
+        logging.info("ProbeKS1: multi_probe_end called")
         self.mcu_endstop.multi_probe_end()
+        # Disable CS1237 strain gauge sensor after probe session
+        if self.cs1237 is not None:
+            self.cs1237._enable_cs1237(0)
 
     def raise_probe(self):
         # No-op for strain gauge probe (always active)

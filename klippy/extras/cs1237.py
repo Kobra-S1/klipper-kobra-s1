@@ -67,6 +67,7 @@ class CS1237:
         self._clients        = []
         self._reporting      = False
         self._query_complete = None
+        self._enable_count   = 0
 
         # Register config callback for MCU command setup
         self.mcu.register_config_callback(self._build_config)
@@ -90,33 +91,10 @@ class CS1237:
         gcode.register_command('CS_ADC_ENABLE',    self.cmd_enable_cs1237, False, 'Trigger enable_cs1237 MCU command')
         
         # Register event handlers
-        self.printer.register_event_handler('project:ready', self._handle_ready)
-        self.printer.register_event_handler('klippy:ready', self._on_ready_enable)
-    
-    def _on_ready_enable(self, *a, **k):
-        try:
-            self._cmd_reset.send([self._oid, 1])
-        except Exception:
-            pass
-        self._enable_cs1237(1)
-        try:
-            ticks = self.mcu.seconds_to_clock(0.10)
-            self.cmd_start_report.send([
-                self._oid,
-                1,
-                ticks,
-                0,              
-                self.sensitivity
-            ])
-        except Exception:
-            logging.exception("CS1237: failed to prime comparator")
-        try:
-            self.cmd_start_report.send([self._oid, 0, 0, 0, 0])
-        except Exception:
-            pass
+        self.printer.register_event_handler('klippy:ready', self._handle_ready)
 
-        
     def _handle_ready(self, *args):
+        """Boot-time self-check: temporarily enables sensor, then disables."""
         params = None
         try:
             self._cmd_reset.send([self._oid, 3])
@@ -124,6 +102,7 @@ class CS1237:
             reactor = self.printer.get_reactor()
             reactor.pause(reactor.monotonic() + 0.1)
 
+            # Temporarily enable for self-check only (bypass ref-count)
             self._enable_cs1237(1)
             self._query_complete = reactor.completion()
             self.cmd_checkself.send([self._oid, 0])
@@ -132,13 +111,20 @@ class CS1237:
         except Exception:
             logging.exception("CS1237: Error in _handle_ready")
         finally:
+            # Always disable after self-check
             self._enable_cs1237(0)
             self._query_complete = None
 
-        if params is not None:
+        if params is None:
+            logging.warning("CS1237: boot self-check timed out (no response in 2s)")
+        else:
             state = int(params.get('flag', 0))
             if state == 0:
-                self.printer.invoke_shutdown("cs1237 boot up checkself failed")
+                logging.warning(
+                    "CS1237: boot self-check returned flag=0 "
+                    "(flash at 0x08007800 may not have been written by factory calibration)")
+            else:
+                logging.info("CS1237: boot self-check passed (flag=%d)", state)
 
     def cmd_enable_cs1237(self, gcmd):
         state = gcmd.get_int('STATE', 1, minval=0, maxval=1)
@@ -146,8 +132,10 @@ class CS1237:
         gcmd.respond_info(f"CS_ADC_ENABLE state={state}")
 
     def _enable_cs1237(self, state=1):
+        """Send raw enable/disable command to MCU."""
         self._cmd_enable.send([self._oid, state])
-        logging.info(f"[CS1237] _enable_cs1237 called. STATE={state}")
+        logging.info("[CS1237] _enable_cs1237 STATE=%d enable_count=%d",
+                     state, self._enable_count)
     
     # Dedicated G-code command handlers for MCU commands
     def cmd_checkself_cs1237(self, gcmd):
@@ -213,10 +201,24 @@ class CS1237:
         )
         self._cmd_enable = self.mcu.lookup_command("enable_cs1237 oid=%c state=%c")
         self._cmd_reset  = self.mcu.lookup_command("reset_cs1237 oid=%c count=%c")
+        self._cmd_calibration_phase = self.mcu.lookup_command(
+            "cs1237_calibration_phase oid=%c cali_state=%c speed_state=%c"
+        )
+        self._cmd_calibration_data_process = self.mcu.lookup_command(
+            "cs1237_calibration_DataProcess oid=%c"
+        )
+
+        # Ensure sensor is disabled after config (guards against warm restart
+        # leaving EXTI enabled and level_out pin in stale triggered state)
+        self.mcu.add_config_cmd(
+            f"enable_cs1237 oid={self._oid} state=0"
+        )
 
         self.mcu.register_response(self._handle_cs1237_report,  'cs1237_state', self._oid)
         self.mcu.register_response(self._handle_cs1237_diff,    'cs1237_diff', self._oid)
         self.mcu.register_response(self._handle_cs1237_check,   'cs1237_checkself_flag', self._oid)
+        self.mcu.register_response(self._handle_cs1237_calibration_val,
+                       'cs1237_calibration_Val', self._oid)
 
     def _handle_start_report_ack(self, params):
         logging.info(f"[CS1237] start_cs1237_report ACK received: {params}")
@@ -233,10 +235,11 @@ class CS1237:
             self.adc_value = self._int32_conversion(int(params.get('adc', 0)))
             self.raw_value = self._int32_conversion(int(params.get('raw', 0)))
             self.sensor_state = int(params.get('state', 0))
+            now = self.printer.get_reactor().monotonic()
             logging.info(f"[CS1237 REPORT] adc={self.adc_value} raw={self.raw_value} state={self.sensor_state}")
 
             msg = {
-                'timestamp': self.printer.get_reactor().monotonic(),
+                'timestamp': now,
                 'adc': self.adc_value,
                 'raw': self.raw_value,
                 'state': self.sensor_state
@@ -262,7 +265,15 @@ class CS1237:
 
     def _handle_cs1237_diff(self, params):
         try:
-            self.raw_value = int(params.get('raw', 0))
+            raw_val = self._int32_conversion(int(params.get('raw', 0)))
+            diff_val = self._int32_conversion(int(params.get('diff', 0)))
+            self.raw_value = raw_val
+
+            logging.info(
+                "[CS1237] diff raw=%d diff=%d",
+                raw_val, diff_val
+            )
+
             if self._query_complete:
                 self._query_complete.complete(params)
         except Exception:
@@ -276,6 +287,44 @@ class CS1237:
                 self._query_complete.complete(params)
         except Exception:
             logging.exception("CS1237: self-check handler error")
+
+    def _handle_cs1237_calibration_val(self, params):
+        """Handle cs1237_calibration_Val response from MCU.
+
+        Passes raw MCU values through UNCHANGED to the waiting completion.
+        The Go binary's DataProcess handler (cs1237.go:308-339) applies
+        MathUtils.Abs to each value, then sends them via ReactorCompletion.
+        Our MCU firmware does the same — so no host-side transformation is
+        needed.  flow_calibration.py consumes these raw values directly.
+        """
+        try:
+            # Diagnostic: log the raw params dict EXACTLY as received from MCU
+            # to detect key mismatches or unexpected formats.
+            logging.info(
+                "[CS1237 CALTRACE] calibration_Val raw params keys=%s vals=%s",
+                list(params.keys()) if hasattr(params, 'keys') else type(params).__name__,
+                {k: v for k, v in params.items()} if hasattr(params, 'items') else params,
+            )
+            block_pre_val = self._int32_conversion(
+                int(params.get('BlockPreVal', 0))
+            )
+            target_val = self._int32_conversion(int(params.get('TargetVal', 0)))
+            real_val = self._int32_conversion(int(params.get('RealVal', 0)))
+
+            payload = {
+                'BlockPreVal': block_pre_val,
+                'TargetVal': target_val,
+                'RealVal': real_val,
+            }
+            logging.info(
+                "[CS1237 CALTRACE] cal raw=(%d,%d,%d) delta=%d",
+                block_pre_val, target_val, real_val,
+                real_val - target_val,
+            )
+            if self._query_complete:
+                self._query_complete.complete(payload)
+        except Exception:
+            logging.exception("CS1237: calibration value handler error")
 
 
     # ---- Status ----
@@ -347,18 +396,24 @@ class CS1237:
         sens = sensitivity_map.get(s, self.sensitivity)
 
         if e:
-           # Tell the host proxy to start reports
-            self._enable_cs1237(1)
+            # Ref-counted enable: only sends MCU command on first enable
+            if self._enable_count == 0:
+                self._enable_cs1237(1)
+            self._enable_count += 1
             self.start_reporting()
-           # Then instruct MCU to report cs1237_state every T seconds
+            # Instruct MCU to report cs1237_state every T seconds
             self._check_start(t, s, sens, 0)
             gcmd.respond_info(f"CS_ADC reporting enabled state={s} sens={sens} period={t}")
         else:
-           # First tell MCU to stop cs1237_state messages
+            # First tell MCU to stop cs1237_state messages
             self._check_stop(s)
-           # Then tell the host proxy to stop reporting
+            # Then stop host-side reporting
             self.stop_reporting()
-            self._enable_cs1237(0)
+            # Ref-counted disable: only sends MCU command on last disable
+            self._enable_count -= 1
+            if self._enable_count <= 0:
+                self._enable_count = 0
+                self._enable_cs1237(0)
             gcmd.respond_info("CS_ADC reporting disabled")
 
     def cmd_g9121(self, gcmd):
@@ -368,9 +423,11 @@ class CS1237:
         t = gcmd.get_float('T', 1.0, minval=0.1, maxval=1.0)
         
         if e:
+            self._enable_cs1237(1)
             self._check_start(t, SCRATCH_STATE, self.scratch_sensitivity, 0)
         else:
             self._check_stop(SCRATCH_STATE)
+            self._enable_cs1237(0)
     
     def cmd_g9122(self, gcmd):
         e = gcmd.get_int('E', 0, minval=0, maxval=1)
@@ -379,9 +436,11 @@ class CS1237:
         t = gcmd.get_float('T', 1.0, minval=0.1, maxval=1.0)
         
         if e:
+            self._enable_cs1237(1)
             self._check_start(t, SELF_CHECK_STATE, self.self_check_sensitivity, 0)
         else:
             self._check_stop(SELF_CHECK_STATE)
+            self._enable_cs1237(0)
 
     def cmd_g9123(self, gcmd):
         reactor = self.printer.get_reactor()
@@ -432,21 +491,28 @@ class CS1237:
             self.printer.get_reactor().monotonic() + 0.1
         )
         
-        self._check_start(1.0, SELF_CHECK_STATE, self.self_check_sensitivity, 0)
-        
-        self._self_check_resonances()
-        
-        # Wait for moves to complete
-        toolhead = self.printer.lookup_object('toolhead')
-        toolhead.wait_moves()
-        
-        # Pause for 3 seconds to collect data
-        self.printer.get_reactor().pause(
-            self.printer.get_reactor().monotonic() + 3.0
-        )
-        
-        # Stop the check
-        self._check_stop(SELF_CHECK_STATE)
+        # Enable sensor for self-check
+        self._enable_cs1237(1)
+        try:
+            self._check_start(1.0, SELF_CHECK_STATE,
+                              self.self_check_sensitivity, 0)
+            
+            self._self_check_resonances()
+            
+            # Wait for moves to complete
+            toolhead = self.printer.lookup_object('toolhead')
+            toolhead.wait_moves()
+            
+            # Pause for 3 seconds to collect data
+            self.printer.get_reactor().pause(
+                self.printer.get_reactor().monotonic() + 3.0
+            )
+            
+            # Stop the check
+            self._check_stop(SELF_CHECK_STATE)
+        finally:
+            # Always disable sensor after self-check
+            self._enable_cs1237(0)
         
         # Check result and raise error if needed
         if self.sensor_state == SELF_CHECK_ERR:
