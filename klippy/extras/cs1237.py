@@ -93,7 +93,7 @@ class CS1237:
         # Register event handlers
         self.printer.register_event_handler('klippy:ready', self._handle_ready)
 
-    def _handle_ready(self, *args):
+    def _handle_do_ready(self, eventtime):
         """Boot-time self-check: temporarily enables sensor, then disables."""
         params = None
         try:
@@ -125,6 +125,10 @@ class CS1237:
                     "(flash at 0x08007800 may not have been written by factory calibration)")
             else:
                 logging.info("CS1237: boot self-check passed (flag=%d)", state)
+
+    def _handle_ready(self, *args):
+        # Defer to reactor callback: klippy:ready runs with pause disabled.
+        self.printer.get_reactor().register_callback(self._handle_do_ready)
 
     def cmd_enable_cs1237(self, gcmd):
         state = gcmd.get_int('STATE', 1, minval=0, maxval=1)
@@ -214,11 +218,26 @@ class CS1237:
             f"enable_cs1237 oid={self._oid} state=0"
         )
 
-        self.mcu.register_response(self._handle_cs1237_report,  'cs1237_state', self._oid)
-        self.mcu.register_response(self._handle_cs1237_diff,    'cs1237_diff', self._oid)
-        self.mcu.register_response(self._handle_cs1237_check,   'cs1237_checkself_flag', self._oid)
-        self.mcu.register_response(self._handle_cs1237_calibration_val,
-                       'cs1237_calibration_Val', self._oid)
+        self.mcu.register_serial_response(
+            self._handle_cs1237_report,
+            'cs1237_state oid=%c adc=%i raw=%i state=%c',
+            self._oid,
+        )
+        self.mcu.register_serial_response(
+            self._handle_cs1237_diff,
+            'cs1237_diff oid=%c diff=%i raw=%i',
+            self._oid,
+        )
+        self.mcu.register_serial_response(
+            self._handle_cs1237_check,
+            'cs1237_checkself_flag oid=%c flag=%c',
+            self._oid,
+        )
+        self.mcu.register_serial_response(
+            self._handle_cs1237_calibration_val,
+            'cs1237_calibration_Val oid=%c BlockPreVal=%i TargetVal=%i RealVal=%i',
+            self._oid,
+        )
 
     def _handle_start_report_ack(self, params):
         logging.info(f"[CS1237] start_cs1237_report ACK received: {params}")
@@ -292,10 +311,6 @@ class CS1237:
         """Handle cs1237_calibration_Val response from MCU.
 
         Passes raw MCU values through UNCHANGED to the waiting completion.
-        The Go binary's DataProcess handler (cs1237.go:308-339) applies
-        MathUtils.Abs to each value, then sends them via ReactorCompletion.
-        Our MCU firmware does the same — so no host-side transformation is
-        needed.  flow_calibration.py consumes these raw values directly.
         """
         try:
             # Diagnostic: log the raw params dict EXACTLY as received from MCU

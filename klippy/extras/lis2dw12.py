@@ -84,11 +84,16 @@ class LIS2DW12:
         )
         self.mcu.add_config_cmd(query_cmd, on_restart=True)
         self.mcu.register_config_callback(self._build_config)
-        self.mcu.register_response(
-            self._handle_lis2dw12_data, "lis2dw12_data", self.oid
+        self.mcu.register_serial_response(
+            self._handle_lis2dw12_data,
+            "lis2dw12_data oid=%c sequence=%hu data=%*s",
+            self.oid,
         )
-        self.mcu.register_response(
-            self._handle_lis2dw12_status, "lis2dw12_status", self.oid
+        self.mcu.register_serial_response(
+            self._handle_lis2dw12_status,
+            "lis2dw12_status oid=%c clock=%u query_ticks=%u next_sequence=%hu"
+            " buffered=%c fifo=%c limit_count=%hu",
+            self.oid,
         )
 
         # Batch/bulk sensor setup
