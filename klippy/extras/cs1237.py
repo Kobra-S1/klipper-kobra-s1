@@ -68,6 +68,7 @@ class CS1237:
         self._reporting      = False
         self._query_complete = None
         self._enable_count   = 0
+        self.capabilities    = set()
 
         # Register config callback for MCU command setup
         self.mcu.register_config_callback(self._build_config)
@@ -89,7 +90,7 @@ class CS1237:
         gcode.register_command('CS_ADC_REPORT',    self.cmd_start_cs1237_report, False, 'Trigger start_cs1237_report MCU command')
         gcode.register_command('CS_ADC_DIFF',      self.cmd_query_cs1237_diff, False, 'Trigger query_cs1237_diff MCU command')
         gcode.register_command('CS_ADC_ENABLE',    self.cmd_enable_cs1237, False, 'Trigger enable_cs1237 MCU command')
-        
+
         # Register event handlers
         self.printer.register_event_handler('klippy:ready', self._handle_ready)
 
@@ -181,12 +182,27 @@ class CS1237:
         gcmd.respond_info(f"CS_ADC_REPORT enable=1 ticks={ticks} state={print_state} sens={sensitivity}")
 
     def cmd_query_cs1237_diff(self, gcmd):
-        diff_cmd = self.mcu.lookup_command("query_cs1237_diff oid=%c")
-        diff_cmd.send([
+        self._cmd_query_diff.send([
             self._oid
         ])
         self.printer.register_event_handler('cs1237:self_check', self._self_check_sequence)
         gcmd.respond_info("CS_ADC_DIFF requested")
+
+    def cmd_cs1237_calibration_phase(self, gcmd):
+        cali_state = gcmd.get_int('CALI_STATE', minval=0, maxval=255)
+        speed_state = gcmd.get_int('SPEED_STATE', minval=0, maxval=255)
+        self.cs1237_calibration_phase(cali_state, speed_state)
+        gcmd.respond_info(
+            f"CS_ADC_CAL_PHASE sent cali_state={cali_state} speed_state={speed_state}")
+
+    def cmd_cs1237_calibration_data(self, gcmd):
+        timeout = gcmd.get_float('TIMEOUT', 2.0, above=0.0)
+        params = self.cs1237_calibration_data_process(timeout=timeout)
+        gcmd.respond_info(
+            "CS_ADC_CAL_DATA "
+            f"BlockPreVal={params['BlockPreVal']} "
+            f"TargetVal={params['TargetVal']} "
+            f"RealVal={params['RealVal']}")
 
     def _build_config(self):
         self._oid = self.mcu.create_oid()
@@ -202,6 +218,9 @@ class CS1237:
         )
         self.cmd_checkself = self.mcu.lookup_command(
             "checkself_cs1237 oid=%c write=%c"
+        )
+        self._cmd_query_diff = self.mcu.lookup_command(
+            "query_cs1237_diff oid=%c"
         )
         self._cmd_enable = self.mcu.lookup_command("enable_cs1237 oid=%c state=%c")
         self._cmd_reset  = self.mcu.lookup_command("reset_cs1237 oid=%c count=%c")
@@ -227,11 +246,7 @@ class CS1237:
             'cs1237_checkself_flag oid=%c flag=%c',
             self._oid,
         )
-        self.mcu.register_serial_response(
-            self._handle_cs1237_calibration_val,
-            'cs1237_calibration_Val oid=%c BlockPreVal=%i TargetVal=%i RealVal=%i',
-            self._oid,
-        )
+        self._maybe_enable_stock_calibration()
 
     def _handle_start_report_ack(self, params):
         logging.info(f"[CS1237] start_cs1237_report ACK received: {params}")
@@ -302,13 +317,7 @@ class CS1237:
             logging.exception("CS1237: self-check handler error")
 
     def _handle_cs1237_calibration_val(self, params):
-        """Handle cs1237_calibration_Val response from MCU.
-
-        Passes raw MCU values through UNCHANGED to the waiting completion.
-        """
         try:
-            # Diagnostic: log the raw params dict EXACTLY as received from MCU
-            # to detect key mismatches or unexpected formats.
             logging.info(
                 "[CS1237 CALTRACE] calibration_Val raw params keys=%s vals=%s",
                 list(params.keys()) if hasattr(params, 'keys') else type(params).__name__,
@@ -334,6 +343,57 @@ class CS1237:
                 self._query_complete.complete(payload)
         except Exception:
             logging.exception("CS1237: calibration value handler error")
+
+    def cs1237_diff_process(self, timeout=2.0):
+        """Request the current stock diff/raw pair and wait for reply."""
+        if self._query_complete is not None:
+            raise self.printer.command_error(
+                "CS1237: another synchronous query is already pending")
+        reactor = self.printer.get_reactor()
+        params = None
+        try:
+            self._query_complete = reactor.completion()
+            self._cmd_query_diff.send([self._oid])
+            params = self._query_complete.wait(reactor.monotonic() + timeout)
+        finally:
+            self._query_complete = None
+        if params is None:
+            raise self.printer.command_error("CS1237: diff query timed out")
+        return {
+            'diff': self._int32_conversion(int(params.get('diff', 0))),
+            'raw': self._int32_conversion(int(params.get('raw', 0))),
+        }
+
+    def _stock_cs1237_calibration_phase(self, cali_state, speed_state):
+        self._cmd_calibration_phase.send([
+            self._oid,
+            int(cali_state) & 0xff,
+            int(speed_state) & 0xff,
+        ])
+        logging.info(
+            "[CS1237 CALTRACE] phase cali_state=%d speed_state=%d",
+            cali_state, speed_state)
+
+    def _stock_cs1237_calibration_data_process(self, timeout=2.0):
+        if self._query_complete is not None:
+            raise self.printer.command_error(
+                "CS1237: another synchronous query is already pending")
+        reactor = self.printer.get_reactor()
+        params = None
+        try:
+            self._query_complete = reactor.completion()
+            self._cmd_calibration_data.send([self._oid])
+            params = self._query_complete.wait(reactor.monotonic() + timeout)
+        finally:
+            self._query_complete = None
+        if params is None:
+            raise self.printer.command_error(
+                "CS1237: calibration data timed out")
+        return {
+            'BlockPreVal': self._int32_conversion(int(params.get('BlockPreVal', 0))),
+            'TargetVal': self._int32_conversion(int(params.get('TargetVal', 0))),
+            'RealVal': self._int32_conversion(int(params.get('RealVal', 0))),
+        }
 
 
     # ---- Status ----
@@ -537,6 +597,39 @@ class CS1237:
             gcode.run_script_from_command(cmd)
         except Exception:
             logging.exception("CS1237: Error running resonance test")
+
+    def _maybe_enable_stock_calibration(self):
+        phase_cmd = self.mcu.try_lookup_command(
+            "cs1237_calibration_phase oid=%c cali_state=%c speed_state=%c"
+        )
+        data_cmd = self.mcu.try_lookup_command(
+            "cs1237_calibration_DataProcess oid=%c"
+        )
+        has_response = self.mcu.check_valid_response(
+            'cs1237_calibration_Val oid=%c BlockPreVal=%i TargetVal=%i RealVal=%i'
+        )
+        if phase_cmd is None or data_cmd is None or not has_response:
+            return
+
+        self._cmd_calibration_phase = phase_cmd
+        self._cmd_calibration_data = data_cmd
+        self.mcu.register_serial_response(
+            self._handle_cs1237_calibration_val,
+            'cs1237_calibration_Val oid=%c BlockPreVal=%i TargetVal=%i RealVal=%i',
+            self._oid,
+        )
+        gcode = self.printer.lookup_object('gcode')
+        gcode.register_command(
+            'CS_ADC_CAL_PHASE', self.cmd_cs1237_calibration_phase, False,
+            'Trigger cs1237_calibration_phase MCU command')
+        gcode.register_command(
+            'CS_ADC_CAL_DATA', self.cmd_cs1237_calibration_data, False,
+            'Trigger cs1237_calibration_DataProcess MCU command')
+        self.cs1237_calibration_phase = self._stock_cs1237_calibration_phase
+        self.cs1237_calibration_data_process = (
+            self._stock_cs1237_calibration_data_process)
+        self.capabilities.add('stock_calibration')
+        self.capabilities.add('stock_compat')
 
 def load_config(config):
     return CS1237(config)
