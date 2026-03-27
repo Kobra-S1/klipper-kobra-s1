@@ -21,12 +21,13 @@ struct i2c_software {
     uint32_t ticks;
 };
 
-void
-command_i2c_set_sw_bus(uint32_t *args)
+// Internal helper to setup software I2C bus
+static void
+i2c_sw_bus_setup(uint32_t *args, uint32_t ticks)
 {
     struct i2cdev_s *i2c = i2cdev_oid_lookup(args[0]);
     struct i2c_software *is = alloc_chunk(sizeof(*is));
-    is->ticks = args[3];
+    is->ticks = ticks;
     is->addr = (args[4] & 0x7f) << 1; // address format shifted
     is->scl_out = gpio_out_setup(args[1], 1);
     is->scl_in = gpio_in_setup(args[1], 1);
@@ -34,9 +35,29 @@ command_i2c_set_sw_bus(uint32_t *args)
     is->sda_in = gpio_in_setup(args[2], 1);
     i2cdev_set_software_bus(i2c, is);
 }
+
+// New command: pulse_ticks is already in MCU clock ticks
+void
+command_i2c_set_sw_bus(uint32_t *args)
+{
+    i2c_sw_bus_setup(args, args[3]);
+}
 DECL_COMMAND(command_i2c_set_sw_bus,
              "i2c_set_sw_bus oid=%c scl_pin=%u sda_pin=%u"
              " pulse_ticks=%u address=%u");
+
+// Backward-compatible command for klipper-go: rate is in Hz, convert to ticks
+// Note: vanilla Klipper uses seconds_to_clock(1./speed/2) for I2C half-cycle.
+void
+command_i2c_set_software_bus(uint32_t *args)
+{
+    uint32_t rate = args[3];
+    uint32_t pulse_ticks = rate ? (CONFIG_CLOCK_FREQ / rate / 2) : 1;
+    i2c_sw_bus_setup(args, pulse_ticks);
+}
+DECL_COMMAND(command_i2c_set_software_bus,
+             "i2c_set_software_bus oid=%c scl_pin=%u sda_pin=%u"
+             " rate=%u address=%u");
 
 static void
 i2c_delay(uint32_t ticks)

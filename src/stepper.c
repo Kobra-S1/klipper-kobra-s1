@@ -14,11 +14,12 @@
 #include "stepper.h" // stepper_event
 #include "trsync.h" // trsync_add_signal
 
-DECL_CONSTANT("STEPPER_STEP_BOTH_EDGE", 1);
-
 #if CONFIG_INLINE_STEPPER_HACK && CONFIG_WANT_STEPPER_OPTIMIZED_BOTH_EDGE
  #define HAVE_EDGE_OPTIMIZATION 1
  #define HAVE_AVR_OPTIMIZATION 0
+ // Declare constants only when edge optimization is actually enabled
+ DECL_CONSTANT("STEPPER_STEP_BOTH_EDGE", 1);
+ DECL_CONSTANT("STEPPER_BOTH_EDGE", 1);  // Backward-compatible for klipper-go
 #elif CONFIG_INLINE_STEPPER_HACK && CONFIG_MACH_AVR
  #define HAVE_EDGE_OPTIMIZATION 0
  #define HAVE_AVR_OPTIMIZATION 1

@@ -4,5 +4,7 @@
 #include <stdint.h> // uint32_t
 
 void udelay(uint32_t usecs);
+void timer_pause(void);
+void timer_resume(void);
 
 #endif // armcm_timer.h

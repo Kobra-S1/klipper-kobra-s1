@@ -19,11 +19,11 @@ struct spi_software {
     uint8_t mode;
 };
 
-void
-command_spi_set_sw_bus(uint32_t *args)
+// Internal helper to setup software SPI bus
+static void
+spi_sw_bus_setup(uint32_t *args, uint32_t sck_ticks)
 {
     uint8_t mode = args[4];
-    uint32_t pulse_ticks = args[5];
     if (mode > 3)
         shutdown("Invalid spi config");
 
@@ -33,12 +33,32 @@ command_spi_set_sw_bus(uint32_t *args)
     ss->mosi = gpio_out_setup(args[2], 0);
     ss->sclk = gpio_out_setup(args[3], 0);
     ss->mode = mode;
-    ss->sck_ticks = pulse_ticks;
+    ss->sck_ticks = sck_ticks;
     spidev_set_software_bus(spi, ss);
+}
+
+// New command: pulse_ticks is already in MCU clock ticks
+void
+command_spi_set_sw_bus(uint32_t *args)
+{
+    spi_sw_bus_setup(args, args[5]);
 }
 DECL_COMMAND(command_spi_set_sw_bus,
              "spi_set_sw_bus oid=%c miso_pin=%u mosi_pin=%u sclk_pin=%u"
              " mode=%u pulse_ticks=%u");
+
+// Backward-compatible command for klipper-go: rate is in Hz, convert to ticks
+void
+command_spi_set_software_bus(uint32_t *args)
+{
+    uint32_t rate = args[5];
+    // Convert rate (Hz) to pulse ticks: ticks = clock_freq / rate
+    uint32_t pulse_ticks = rate ? (CONFIG_CLOCK_FREQ / rate) : 1;
+    spi_sw_bus_setup(args, pulse_ticks);
+}
+DECL_COMMAND(command_spi_set_software_bus,
+             "spi_set_software_bus oid=%c miso_pin=%u mosi_pin=%u sclk_pin=%u"
+             " mode=%u rate=%u");
 
 static void
 spi_delay(uint32_t end)

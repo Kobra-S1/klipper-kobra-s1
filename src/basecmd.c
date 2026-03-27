@@ -275,6 +275,7 @@ config_reset(uint32_t *args)
     sched_clear_shutdown();
     irq_enable();
 }
+DECL_COMMAND_FLAGS(config_reset, HF_IN_SHUTDOWN, "config_reset");
 
 
 /****************************************************************

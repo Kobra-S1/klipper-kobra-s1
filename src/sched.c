@@ -14,6 +14,7 @@
 #include "command.h" // shutdown
 #include "sched.h" // sched_check_periodic
 #include "stepper.h" // stepper_event
+#include "generic/Debug_serial_irq.h" // Debug_sendf
 
 static struct timer periodic_timer, sentinel_timer, deleted_timer;
 
@@ -348,6 +349,10 @@ sched_main(void)
     extern void ctr_run_initfuncs(void);
     ctr_run_initfuncs();
 
+    Debug_sendf("starting\n");
+    Debug_sendf("start\n");
+    uint32_t version = *(uint32_t*)CONFIG_FLASH_OTA_DATA_ADDRESS;
+    Debug_sendf("version:%d.%d.%d\n",version>>16&0xFF,version>>8&0xFF,version&0xFF);
     sendf("starting");
 
     irq_disable();

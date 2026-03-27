@@ -483,6 +483,25 @@ def git_version():
     logging.debug("Got git version: %s" % (repr(ver),))
     return ver
 
+# Obtain firmware version from ".config"
+def config_version():
+    if not os.path.exists('.config'):
+        logging.debug("No '.config' file found")
+        return ""
+    try:
+        with open('.config', 'r') as f:
+            for line in f:
+                if not line.startswith('CONFIG_FIRMWARE_VERSION='):
+                    continue
+                ver = line.split('=', 1)[1].strip()
+                if len(ver) >= 2 and ver[0] == '"' and ver[-1] == '"':
+                    ver = ver[1:-1]
+                logging.debug("Got config firmware version: %s" % (repr(ver),))
+                return ver
+    except Exception:
+        logging.exception("Unable to read CONFIG_FIRMWARE_VERSION from .config")
+    return ""
+
 # Obtain version info from "klippy/.version" file
 def file_version():
     if not os.path.exists('klippy/.version'):
@@ -493,6 +512,9 @@ def file_version():
     return ver
 
 def build_version(extra, cleanbuild):
+    version = config_version()
+    if version:
+        return version + extra
     version = git_version()
     if not version:
         cleanbuild = False

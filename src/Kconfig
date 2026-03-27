@@ -4,12 +4,14 @@ mainmenu "Klipper Firmware Configuration"
 
 config LOW_LEVEL_OPTIONS
     bool "Enable extra low-level configuration options"
+    default y
     help
         Enable low-level configuration options that (if modified) may
         result in a build that does not function correctly.
 
 choice
     prompt "Micro-controller Architecture"
+    default MACH_STM32
     config MACH_AVR
         bool "Atmega AVR"
     config MACH_ATSAM
@@ -52,10 +54,17 @@ config SERIAL
 config SERIAL_BAUD
     depends on SERIAL
     int "Baud rate for serial port" if LOW_LEVEL_OPTIONS
-    default 250000
+    default 576000
     help
         Specify the baud rate of the serial port. This should be set
         to 250000. Read the FAQ before changing this value.
+
+# Firmware version for OTA updates
+config FIRMWARE_VERSION
+    string "Firmware version string"
+    default "v2.0.8"
+    help
+        Firmware version identifier used for OTA updates.
 
 # Generic configuration options for USB
 config USBSERIAL
@@ -123,59 +132,55 @@ config WANT_TMCUART
 config WANT_NEOPIXEL
     bool
     depends on HAVE_GPIO
-    default y
+    default n
 config WANT_PULSE_COUNTER
     bool
     depends on HAVE_GPIO
-    default y
+    default n
 config WANT_ST7920
     bool
     depends on HAVE_GPIO
-    default y
+    default n
 config WANT_HD44780
     bool
     depends on HAVE_GPIO
-    default y
+    default n
 config WANT_ADXL345
     bool
     depends on WANT_SPI
-    default y
+    default n
 config WANT_LIS2DW
     bool
     depends on WANT_SPI || WANT_I2C
-    default y
-config WANT_BMI160
-    bool
-    depends on WANT_SPI || WANT_I2C
-    default y
+    default n
 config WANT_MPU9250
     bool
     depends on WANT_I2C
-    default y
+    default n
 config WANT_ICM20948
     bool
     depends on WANT_I2C
-    default y
+    default n
 config WANT_THERMOCOUPLE
     bool
     depends on WANT_SPI
-    default y
+    default n
 config WANT_HX71X
     bool
     depends on HAVE_GPIO
-    default y
+    default n
 config WANT_ADS1220
     bool
     depends on WANT_SPI
-    default y
+    default n
 config WANT_LDC1612
     bool
     depends on WANT_I2C
-    default y
+    default n
 config WANT_SENSOR_ANGLE
     bool
     depends on WANT_SPI
-    default y
+    default n
 config NEED_SENSOR_BULK
     bool
     depends on WANT_ADXL345 || WANT_LIS2DW || WANT_BMI160 || WANT_MPU9250 || WANT_ICM20948 \
@@ -184,11 +189,11 @@ config NEED_SENSOR_BULK
 config WANT_TRIGGER_ANALOG
     bool
     depends on WANT_ADC || WANT_HX71X || WANT_ADS1220 || WANT_LDC1612
-    default y
+    default n
 config NEED_SOS_FILTER
     bool
     depends on WANT_TRIGGER_ANALOG
-    default y
+    default n
 menu "Optional features (to reduce code size)"
     depends on HAVE_LIMITED_CODE_SIZE
 config WANT_ADC
@@ -268,6 +273,7 @@ comment "Other features"
 config WANT_TRIGGER_ANALOG
     bool "Support for homing/probing events using analog sensors"
     depends on WANT_ADC || WANT_HX71X || WANT_ADS1220 || WANT_LDC1612
+    default n
 endmenu
 
 # Generic configuration options for CANbus
@@ -291,6 +297,10 @@ config INLINE_STEPPER_HACK
     default y
 config HAVE_STEPPER_OPTIMIZED_BOTH_EDGE
     bool
+# Backward-compatible alias for original Anycubic stepper.c
+config HAVE_STEPPER_BOTH_EDGE
+    bool
+    default HAVE_STEPPER_OPTIMIZED_BOTH_EDGE
 config WANT_STEPPER_OPTIMIZED_BOTH_EDGE
     bool "Optimize stepper code for 'step on both edges'" if LOW_LEVEL_OPTIONS
     depends on INLINE_STEPPER_HACK && HAVE_STEPPER_OPTIMIZED_BOTH_EDGE
@@ -309,6 +319,7 @@ config WANT_STEPPER_OPTIMIZED_BOTH_EDGE
 # Support setting gpio state at startup
 config INITIAL_PINS
     string "GPIO pins to set at micro-controller startup"
+    default "PB4" if MACH_STM32F103
     depends on LOW_LEVEL_OPTIONS
     help
         One may specify a comma separated list of gpio pins to set
@@ -340,3 +351,11 @@ config HAVE_LIMITED_CODE_SIZE
     bool
 config HAVE_SOFTWARE_DIVIDE_REQUIRED
     bool
+
+# Debug output on separate serial port
+config DEBUG
+    bool "Enable debug output on separate serial port"
+    default y
+    help
+        Enable debug output via Debug_sendf() on a separate UART.
+        This is used for startup messages, version info, and diagnostics.

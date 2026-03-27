@@ -173,3 +173,19 @@ timer_task(void)
     irq_enable();
 }
 DECL_TASK(timer_task);
+
+// Pause DWT cycle counter (for flash erase operations)
+void
+timer_pause(void)
+{
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CTRL &= 0xFFFFFFFE;
+}
+
+// Resume DWT cycle counter
+void
+timer_resume(void)
+{
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
