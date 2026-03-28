@@ -4,6 +4,7 @@
 CROSS_PREFIX=arm-none-eabi-
 
 dirs-y += src/stm32 src/generic lib/fast-hash
+dirs-$(CONFIG_MACH_STM32F1) += src/stm32/flash_hal
 dirs-$(CONFIG_MACH_STM32F0) += lib/stm32f0
 dirs-$(CONFIG_MACH_STM32F1) += lib/stm32f1
 dirs-$(CONFIG_MACH_N32G45x) += lib/n32g45x
@@ -38,6 +39,9 @@ $(OUT)klipper.elf: $(OUT)src/generic/armcm_link.ld
 
 # Add source files
 src-y += stm32/watchdog.c stm32/clockline.c stm32/dfu_reboot.c
+src-y += stm32/flash.c stm32/printf.c
+src-$(CONFIG_MACH_STM32F1) += stm32/flash_hal/stm32f1xx_hal.c stm32/flash_hal/stm32f1xx_hal_flash.c stm32/flash_hal/stm32f1xx_hal_flash_ex.c stm32/flash_hal/stm32f1xx_hal_cortex.c
+src-$(CONFIG_DEBUG) += stm32/Debug_serial.c generic/Debug_serial_irq.c
 src-y += generic/crc16_ccitt.c
 src-y += generic/armcm_boot.c generic/armcm_irq.c generic/armcm_reset.c
 src-$(CONFIG_MACH_STM32F0) += stm32/stm32f0.c ../lib/stm32f0/system_stm32f0xx.c
