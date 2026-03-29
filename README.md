@@ -31,3 +31,6 @@ This port tries to keep this MCU changes compatible with GO-Klipper as much as p
 I ported also the OTA part, so its possible to flash via the Anycubic MCU OTA mechanism the MCU.
 
 So the MCU can be used with vanilla-klipper as well with the ancient GO-Klipper, however some sacrifices had to be made to make that possible, see KOBRA_COMPATIBILITY_PATCHES.md.
+
+The folder mcu_build/ contains a kobra compatible MCU build for reference.
+
