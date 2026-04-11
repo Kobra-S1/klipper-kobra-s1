@@ -34,3 +34,28 @@ So the MCU can be used with vanilla-klipper as well with the ancient GO-Klipper,
 
 The folder mcu_build/ contains a kobra compatible MCU build for reference.
 
+## Build firmware
+
+### STM32 MCU
+
+```bash
+./setup-ubuntu.sh
+make KCONFIG_CONFIG=.config.stm32 menuconfig
+KCONFIG_CONFIG=.config.stm32 ./build.sh --clean
+```
+
+### Linux MCU
+
+In `make menuconfig` set:
+
+- `Micro-controller Architecture` = `Linux process`
+- `GPIO pins to set at micro-controller startup` should be no set (empty string)
+
+Then build:
+
+```bash
+make KCONFIG_CONFIG=.config.linux menuconfig
+make KCONFIG_CONFIG=.config.linux clean
+make KCONFIG_CONFIG=.config.linux -j$(nproc)
+```
+

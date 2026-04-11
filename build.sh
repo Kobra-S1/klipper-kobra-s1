@@ -56,19 +56,23 @@ export PATH="$TOOLCHAIN_BIN:$PATH"
 # Use simple version format (just the tag, no timestamp/hostname)
 export KLIPPER_VERSION_SIMPLE=1
 
+# Use alternative Kconfig file if provided (for example .config.stm32)
+CONFIG_FILE="${KCONFIG_CONFIG:-.config}"
+
 # Verify compiler
 echo -e "${YELLOW}Checking compiler version...${NC}"
 arm-none-eabi-gcc --version | head -n 1
 
-# Check if .config exists
-if [ ! -f .config ]; then
-    echo -e "${RED}Error: .config file not found${NC}"
+# Check if selected config exists
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo -e "${RED}Error: config file not found: $CONFIG_FILE${NC}"
     echo "Please run 'make menuconfig' to configure the build first."
     exit 1
 fi
 
 # Extra compiler flags for variant selection
 MAKE_ARGS=()
+MAKE_ARGS+=("KCONFIG_CONFIG=$CONFIG_FILE")
 
 # Clean build if requested
 if [ $CLEAN_BUILD -eq 1 ]; then
@@ -86,11 +90,11 @@ if [ "${SKIP_CONFIG_SANITY:-0}" != "1" ]; then
     require_config_line() {
         local line="$1"
         local what="$2"
-        if ! grep -q "^${line}$" .config; then
-            echo -e "${RED}Error: invalid .config (${what})${NC}"
+        if ! grep -q "^${line}$" "$CONFIG_FILE"; then
+            echo -e "${RED}Error: invalid config (${what}) in $CONFIG_FILE${NC}"
             echo "Expected: ${line}"
-            echo -e "${YELLOW}Hint: stale .config may contain wrong MCU/OTA settings.${NC}"
-            echo "Run: rm -f .config .config.old && make menuconfig"
+            echo -e "${YELLOW}Hint: stale config may contain wrong MCU/OTA settings.${NC}"
+            echo "Run: rm -f $CONFIG_FILE ${CONFIG_FILE}.old && KCONFIG_CONFIG=$CONFIG_FILE make menuconfig"
             exit 1
         fi
     }
@@ -160,7 +164,7 @@ PY
     then
         echo -e "${RED}✗ OTA protocol sanity check failed.${NC}"
         echo -e "${YELLOW}Your build does not contain required OTA commands/responses.${NC}"
-        echo -e "${YELLOW}Hint: regenerate config with:${NC} rm -f .config .config.old && make menuconfig"
+        echo -e "${YELLOW}Hint: regenerate config with:${NC} rm -f $CONFIG_FILE ${CONFIG_FILE}.old && KCONFIG_CONFIG=$CONFIG_FILE make menuconfig"
         exit 1
     fi
     echo -e "${GREEN}✓ OTA protocol symbols verified${NC}"
@@ -240,8 +244,8 @@ with open('out/klipper.dict', 'rb') as f:
     print(f"  Version: {json.load(f)['version']}")
 PY
     
-    # Get version from Kconfig default or .config
-    VERSION=$(grep -E "^CONFIG_FIRMWARE_VERSION=" .config 2>/dev/null | cut -d'"' -f2 || echo "v1.3.11")
+    # Get version from Kconfig default or selected config file
+    VERSION=$(grep -E "^CONFIG_FIRMWARE_VERSION=" "$CONFIG_FILE" 2>/dev/null | cut -d'"' -f2 || echo "v1.3.11")
     VERSION=${VERSION#v}  # Remove leading 'v' if present
     
     # Get build date (without time)
