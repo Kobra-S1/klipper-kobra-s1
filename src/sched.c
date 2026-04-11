@@ -351,8 +351,10 @@ sched_main(void)
 
     Debug_sendf("starting\n");
     Debug_sendf("start\n");
+#if CONFIG_MACH_STM32
     uint32_t version = *(uint32_t*)CONFIG_FLASH_OTA_DATA_ADDRESS;
     Debug_sendf("version:%d.%d.%d\n",version>>16&0xFF,version>>8&0xFF,version&0xFF);
+#endif
     sendf("starting");
 
     irq_disable();

@@ -62,7 +62,7 @@ config SERIAL_BAUD
 # Firmware version for OTA updates
 config FIRMWARE_VERSION
     string "Firmware version string"
-    default "v2.0.8"
+    default "v2.0.9"
     help
         Firmware version identifier used for OTA updates.
 
@@ -181,6 +181,19 @@ config WANT_SENSOR_ANGLE
     bool
     depends on WANT_SPI
     default n
+config WANT_FLASH_OTA
+    bool
+    depends on MACH_STM32
+    default y
+config WANT_SENSOR_CS1237
+    bool
+    depends on MACH_STM32 && HAVE_GPIO
+    default y
+config WANT_SENSOR_LIS2DW12
+    bool
+    depends on WANT_SPI
+    default y if MACH_STM32
+    default n
 config NEED_SENSOR_BULK
     bool
     depends on WANT_ADXL345 || WANT_LIS2DW || WANT_BMI160 || WANT_MPU9250 || WANT_ICM20948 \
@@ -268,6 +281,17 @@ config WANT_LDC1612
 config WANT_SENSOR_ANGLE
     bool "Support angle sensors"
     depends on WANT_SPI
+comment "Anycubic Kobra S1 features"
+    depends on MACH_STM32
+config WANT_FLASH_OTA
+    bool "Support OTA firmware updates"
+    depends on MACH_STM32
+config WANT_SENSOR_CS1237
+    bool "Support CS1237 ADC sensor"
+    depends on MACH_STM32 && HAVE_GPIO
+config WANT_SENSOR_LIS2DW12
+    bool "Support LIS2DW12 accelerometer (Anycubic)"
+    depends on WANT_SPI
 comment "Other features"
     depends on WANT_ADC || WANT_HX71X || WANT_ADS1220 || WANT_LDC1612
 config WANT_TRIGGER_ANALOG
@@ -320,6 +344,7 @@ config WANT_STEPPER_OPTIMIZED_BOTH_EDGE
 config INITIAL_PINS
     string "GPIO pins to set at micro-controller startup"
     default "PB4" if MACH_STM32F103
+    default ""
     depends on LOW_LEVEL_OPTIONS
     help
         One may specify a comma separated list of gpio pins to set

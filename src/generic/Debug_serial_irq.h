@@ -4,7 +4,7 @@
 #include <stdint.h> // uint32_t
 #include "autoconf.h" // CONFIG_DEBUG
 
-#ifdef CONFIG_DEBUG
+#if CONFIG_DEBUG && (CONFIG_MACH_STM32 || CONFIG_MACH_HC32F460)
 // callback provided by board specific code
 void Debug_serial_enable_tx_irq(void);
 

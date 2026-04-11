@@ -5,6 +5,7 @@
 // This file may be distributed under the terms of the GNU GPLv3 license.
 
 #include <string.h> // memset
+#include "autoconf.h" // CONFIG_MACH_*
 #include "basecmd.h" // oid_lookup
 #include "board/irq.h" // irq_save
 #include "board/misc.h" // alloc_maxsize
@@ -258,6 +259,8 @@ command_finalize_config(uint32_t *args)
 DECL_COMMAND(command_finalize_config, "finalize_config crc=%u");
 
 // Attempt a full manual reset of the config
+// (not used on platforms that provide their own, e.g. linux/main.c, pru/main.c)
+#if !CONFIG_MACH_LINUX && !CONFIG_MACH_PRU
 void
 config_reset(uint32_t *args)
 {
@@ -276,6 +279,7 @@ config_reset(uint32_t *args)
     irq_enable();
 }
 DECL_COMMAND_FLAGS(config_reset, HF_IN_SHUTDOWN, "config_reset");
+#endif
 
 
 /****************************************************************

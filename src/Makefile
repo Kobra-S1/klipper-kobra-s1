@@ -32,5 +32,7 @@ src-$(CONFIG_NEED_SOS_FILTER) += sos_filter.c
 src-$(CONFIG_WANT_TRIGGER_ANALOG) += trigger_analog.c
 
 # Anycubic additions
-src-y += ota_data.c otacmd.c sensor_cs1237.c sensor_lis2dw12.c
+src-$(CONFIG_WANT_FLASH_OTA) += ota_data.c otacmd.c
+src-$(CONFIG_WANT_SENSOR_CS1237) += sensor_cs1237.c
+src-$(CONFIG_WANT_SENSOR_LIS2DW12) += sensor_lis2dw12.c
 # Disabled unneded modules to stay under 96 message limit for k3c if basic go-klipper compatibility is needed
