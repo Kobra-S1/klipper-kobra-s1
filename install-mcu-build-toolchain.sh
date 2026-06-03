@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup script for K3-klipper-mcu build environment on Ubuntu/Debian
+# Install script for K3-klipper-mcu build toolchain on Ubuntu/Debian
 # This script installs all dependencies and ARM GCC toolchain from Ubuntu packages
 
 set -euo pipefail
@@ -67,9 +67,9 @@ echo "Setup completed successfully!"
 echo -e "=======================================================${NC}"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo -e "1. Reload your shell: ${BLUE}source ~/.bashrc${NC}"
-echo -e "2. Configure the build: ${BLUE}make menuconfig${NC}"
-echo -e "3. Build firmware: ${BLUE}bash build.sh${NC}"
+echo -e "1. Configure the STM32 build: ${BLUE}make KCONFIG_CONFIG=.config.stm32 menuconfig${NC}"
+echo -e "   (Just hit "Q" here if you dont want to change anything, the default config should work fine)"
+echo -e "2. Build firmware: ${BLUE}KCONFIG_CONFIG=.config.stm32 ./build.sh --clean${NC}"
 echo ""
 echo -e "${YELLOW}Toolchain location:${NC} /usr/bin/arm-none-eabi-gcc"
 echo ""

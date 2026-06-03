@@ -38,8 +38,12 @@ The folder mcu_build/ contains a kobra compatible MCU build for reference.
 
 ### STM32 MCU
 
+The toolchain installer is intended for debian based systems (like e.g raspbian, ubuntu). On 
+other distributions, install the equivalent `arm-none-eabi-gcc` and build
+dependencies with your distribution package manager instead.
+
 ```bash
-./setup-ubuntu.sh
+./install-mcu-build-toolchain.sh
 make KCONFIG_CONFIG=.config.stm32 menuconfig
 KCONFIG_CONFIG=.config.stm32 ./build.sh --clean
 ```
@@ -58,4 +62,3 @@ make KCONFIG_CONFIG=.config.linux menuconfig
 make KCONFIG_CONFIG=.config.linux clean
 make KCONFIG_CONFIG=.config.linux -j$(nproc)
 ```
-

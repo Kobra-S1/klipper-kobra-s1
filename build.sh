@@ -46,7 +46,7 @@ TOOLCHAIN_BIN="/usr/bin"
 
 if [ ! -x "$TOOLCHAIN_BIN/arm-none-eabi-gcc" ]; then
     echo -e "${RED}Error: arm-none-eabi-gcc not found at $TOOLCHAIN_BIN${NC}"
-    echo "Please run ./setup-ubuntu.sh to install the Ubuntu ARM toolchain package."
+    echo "Please run ./install-mcu-build-toolchain.sh to install the Ubuntu ARM toolchain package."
     exit 1
 fi
 
