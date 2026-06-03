@@ -483,13 +483,14 @@ def git_version():
     logging.debug("Got git version: %s" % (repr(ver),))
     return ver
 
-# Obtain firmware version from ".config"
+# Obtain firmware version from ".config" (or KCONFIG_CONFIG override)
 def config_version():
-    if not os.path.exists('.config'):
-        logging.debug("No '.config' file found")
+    config_file = os.environ.get('KCONFIG_CONFIG', '.config')
+    if not os.path.exists(config_file):
+        logging.debug("No '%s' file found" % config_file)
         return ""
     try:
-        with open('.config', 'r') as f:
+        with open(config_file, 'r') as f:
             for line in f:
                 if not line.startswith('CONFIG_FIRMWARE_VERSION='):
                     continue
