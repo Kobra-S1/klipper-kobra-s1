@@ -44,8 +44,9 @@ dependencies with your distribution package manager instead.
 
 ```bash
 ./install-mcu-build-toolchain.sh
-make KCONFIG_CONFIG=.config.stm32 menuconfig
-KCONFIG_CONFIG=.config.stm32 ./build.sh --clean
+rm -f .config
+make menuconfig
+./build.sh --clean
 ```
 
 ### Linux MCU
@@ -55,10 +56,11 @@ In `make menuconfig` set:
 - `Micro-controller Architecture` = `Linux process`
 - `GPIO pins to set at micro-controller startup` should be no set (empty string)
 
-Then build:
+Then build and flash:
 
 ```bash
-make KCONFIG_CONFIG=.config.linux menuconfig
-make KCONFIG_CONFIG=.config.linux clean
-make KCONFIG_CONFIG=.config.linux -j$(nproc)
+rm -f .config
+make menuconfig
+make clean
+make flash
 ```

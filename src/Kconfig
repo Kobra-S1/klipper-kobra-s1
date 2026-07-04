@@ -168,11 +168,13 @@ config WANT_THERMOCOUPLE
 config WANT_HX71X
     bool
     depends on HAVE_GPIO
-    default y
+    default y if MACH_LINUX
+    default n
 config WANT_ADS131M0X
     bool
     depends on WANT_SPI
-    default y
+    default y if MACH_LINUX
+    default n
 config WANT_ADS1220
     bool
     depends on WANT_SPI
@@ -206,10 +208,12 @@ config NEED_SENSOR_BULK
 config WANT_TRIGGER_ANALOG
     bool
     depends on WANT_ADC || WANT_HX71X || WANT_ADS1220 || WANT_ADS131M0X || WANT_LDC1612
-    default y
+    default y if MACH_LINUX
+    default n
 config NEED_SOS_FILTER
     bool
     depends on WANT_TRIGGER_ANALOG
+    default y if MACH_LINUX
     default n
 menu "Optional features (to reduce code size)"
     depends on HAVE_LIMITED_CODE_SIZE
