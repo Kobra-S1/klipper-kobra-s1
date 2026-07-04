@@ -62,7 +62,7 @@ config SERIAL_BAUD
 # Firmware version for OTA updates
 config FIRMWARE_VERSION
     string "Firmware version string"
-    default "v2.0.9"
+    default "v2.0.10"
     help
         Firmware version identifier used for OTA updates.
 
