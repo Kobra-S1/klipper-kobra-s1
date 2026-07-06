@@ -98,15 +98,21 @@ This will reset both MCUs. Then try again to execute the flash script.
 If you have a KS3, no such GPIO is known, but at least for the toolhead MCU you can just shortly unplug and re-plug the USB-C style connector at the toolhead to reset the MCU.
 
 If you want to immediatly get the MCUs to transfer the new flashed image from passive to active bank, you can use again the above mentioned reset sequence.
-Give after the reset (or a power-cycle) the MCUs a few seconds time, so they can finish the flash copy. If that happens with the main MCU, than you have bad luck, maybe just retry then by power cycling the printer or use the flashing option via go-klipper itself.
+Give after the reset (or a power-cycle) the MCUs a few seconds time, so they can finish the flash copy. If that happens with the main MCU, than you have bad luck, maybe just retry then by power cycling the printer or use the flashing option via go-klipper itself:
+
+Alternativ Go-Klipper MCU flashing method (requires rinkhals or equivalent installed on the printer):
 
 Copy the binary to the userdata partition on the printer.
-Open mainsail/fluidd and then execute the following command to flash the mcu.
+
+Open mainsail/fluidd and then execute the following command to flash the mcu:
+
+OTA_START MCU=mcu UPDATE_PATH=/userdata/<name of firmware binary>.bin
+
 (For nozzle_mcu update use MCU=nozzle_mcu, gklib/mainsail console output may or may not show progress percentage during flashing which takes only a few seconds)
 
-```bash
-OTA_START MCU=mcu UPDATE_PATH=/userdata/<name of firmware binary>.bin
-```
+
+
+
 
 
 ### Usage Example
