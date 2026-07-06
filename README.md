@@ -118,7 +118,7 @@ OTA_START MCU=mcu UPDATE_PATH=/userdata/<name of firmware binary>.bin
 ### Usage Example
 
 ```bash
-python3 mcu_ota_flasher.py --port /dev/ttyGS0 --baudrate 115200 --firmware mcu_build/out/klipper.bin
+python3 mcu_ota_flasher.py --port /dev/ttyGS0 --baudrate 576000 --firmware mcu_build/out/klipper.bin
 ```
 
 **Parameters:**
