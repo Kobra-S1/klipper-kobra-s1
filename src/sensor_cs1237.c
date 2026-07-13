@@ -65,6 +65,15 @@ cs1237_delay(cs1237_time_t start, cs1237_time_t ticks)
 #define MIN_PULSE_TIME  nsecs_to_ticks(300)
 #define MAX_READ_TIME timer_from_us(50)
 
+// Out-of-range (railed / disconnected load-cell ADC) detection.
+// When the raw 24-bit signed reading
+// stays within 0x4000 counts of either +/- full-scale rail (i.e.
+// |adc| > 0x7FC000) for OOR_DEBOUNCE consecutive data-ready samples, the
+// CS1237 is saturated/faulty -> raise shutdown "cs1237 adc out of range".
+// Debounce compare "9 < count"
+#define CS1237_ADC_OUT_OF_RANGE 0x7FC000
+#define CS1237_OOR_DEBOUNCE     10
+
 static inline int32_t
 cs1237_abs(int32_t y)
 {
@@ -364,6 +373,7 @@ void command_enable_cs1237(uint32_t *args)
         cs->slow = 0;
         cs->fast = 0;
         cs->last_trig = 0;
+        cs->oor_count = 0;
         // Clear pending EXTI flag before enabling to avoid stale data-ready
         cs1237_exti_flag_clear();
         // Re-enable EXTI so data-ready pulses wake cs1237_task
@@ -449,6 +459,19 @@ void cs1237_task(void)
             continue;
 
         cs->adc32 = cs1237_read_adc();
+
+        // Railed / disconnected sensor detection (stock fw 1.4.3 parity):
+        // debounce OOR_DEBOUNCE consecutive samples pinned near the +/- rail,
+        // then disable the data-ready interrupt and shut down.
+        if (cs1237_abs(cs->adc32) > CS1237_ADC_OUT_OF_RANGE) {
+            if (++cs->oor_count >= CS1237_OOR_DEBOUNCE) {
+                cs1237_exti_interrupt_disable();
+                shutdown("cs1237 adc out of range");
+            }
+        } else {
+            cs->oor_count = 0;
+        }
+
         average_filter(cs);
 
         // Seed EMA filters from first reading so rate starts at 0

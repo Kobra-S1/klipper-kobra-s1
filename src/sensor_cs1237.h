@@ -16,6 +16,7 @@ struct cs1237_sensor {
     int32_t fast;            // EMA fast filter state
     uint8_t last_trig;       // last trigger output state
     uint8_t seeding;         // 1 = seed EMA filters from first ADC reading
+    uint16_t oor_count;      // consecutive out-of-range (railed ADC) samples
 
 };
 
