@@ -178,12 +178,14 @@ class FilamentTracker:
         if self.signal_type == "adc":
             ppins = self.printer.lookup_object("pins")
             self._detect_adc_pin = ppins.setup_pin("adc", self.detect_pin)
-            self._detect_adc_pin.setup_adc_sample(ADC_SAMPLE_TIME, ADC_SAMPLE_COUNT)
-            self._detect_adc_pin.setup_adc_callback(ADC_REPORT_TIME, self._detect_adc_handler)
+            self._detect_adc_pin.setup_adc_sample(
+                ADC_REPORT_TIME, ADC_SAMPLE_TIME, ADC_SAMPLE_COUNT)
+            self._detect_adc_pin.setup_adc_callback(self._detect_adc_samples)
 
             self._encoder_adc_pin = ppins.setup_pin("adc", self.encoder_pin)
-            self._encoder_adc_pin.setup_adc_sample(ADC_SAMPLE_TIME, ADC_SAMPLE_COUNT)
-            self._encoder_adc_pin.setup_adc_callback(ADC_REPORT_TIME, self._encoder_adc_handler)
+            self._encoder_adc_pin.setup_adc_sample(
+                ADC_REPORT_TIME, ADC_SAMPLE_TIME, ADC_SAMPLE_COUNT)
+            self._encoder_adc_pin.setup_adc_callback(self._encoder_adc_samples)
         else:
             buttons = self.printer.load_object(config, "buttons")
             buttons.register_buttons([self.detect_pin, self.encoder_pin],
@@ -362,6 +364,16 @@ class FilamentTracker:
         )
 
     # ADC path
+    def _detect_adc_samples(self, samples):
+        """ADC callback (list of (time, value) per report) for the detect pin."""
+        for read_time, read_value in samples:
+            self._detect_adc_handler(read_time, read_value)
+
+    def _encoder_adc_samples(self, samples):
+        """ADC callback (list of (time, value) per report) for the encoder pin."""
+        for read_time, read_value in samples:
+            self._encoder_adc_handler(read_time, read_value)
+
     def _detect_adc_handler(self, read_time, read_value):
         """ADC callback for the detect (presence) pin."""
         self._detect_adc_val = read_value
