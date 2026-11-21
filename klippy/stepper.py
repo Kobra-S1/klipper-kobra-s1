@@ -99,7 +99,10 @@ class MCU_stepper:
         elif sou:
             # MCU has optimized step/unstep - better to use that
             want_both_edges = False
-        if not ssbe:
+        if not ssbe and not sbe:
+            # An MCU with the older STEPPER_BOTH_EDGE (the stock Anycubic
+            # firmware) is handled below, and its owner has nothing to
+            # recompile, so don't report it as deprecated
             configfile = self._mcu.get_printer().lookup_object("configfile")
             configfile.deprecate_mcu_code(self._mcu, 'STEPPER_STEP_BOTH_EDGE')
         if want_both_edges:
